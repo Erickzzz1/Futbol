@@ -34,7 +34,7 @@ function App(): JSX.Element {
                 <div className="flex items-center gap-4">
                     <div className="h-6 w-px bg-slate-800 hidden sm:block"></div>
                     <button
-                        className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wide transition-all shadow-lg flex items-center gap-2 ${view === 'dashboard'
+                        className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wide transition-all shadow-lg flex items-center gap-2 ${view === 'admin'
                             ? 'bg-gradient-to-r from-amber-600 to-amber-500 text-black hover:from-amber-500 hover:to-amber-400 shadow-amber-900/20'
                             : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700'
                             }`}
@@ -43,8 +43,8 @@ function App(): JSX.Element {
                         <Settings className="w-4 h-4" /> Panel Admin
                     </button>
                     <button
-                        className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wide transition-all shadow-lg flex items-center gap-2 ${view === 'admin'
-                            ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-black hover:from-emerald-500 hover:to-emerald-400 shadow-emerald-900/20'
+                        className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wide transition-all shadow-lg flex items-center gap-2 ${view === 'dashboard'
+                            ? 'bg-gradient-to-r from-amber-600 to-amber-500 text-black hover:from-amber-500 hover:to-amber-400 shadow-amber-900/20'
                             : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700'
                             }`}
                         onClick={() => setView('dashboard')}

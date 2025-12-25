@@ -5,6 +5,7 @@ import { ScorersTable } from './ScorersTable';
 import { MatchResultsTable } from './MatchResultsTable';
 import { UpcomingMatchesTable } from './UpcomingMatchesTable';
 import { Standing, Scorer, Match, Tournament } from '../types';
+import Logo from '../assets/Icono.png';
 
 interface DashboardProps {
     tournamentId: number;
@@ -133,8 +134,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ tournamentId }) => {
                 </div>
 
                 <div className="bg-gradient-to-br from-amber-400 to-yellow-600 rounded-full p-1 w-24 h-24 shadow-lg shadow-amber-500/20">
-                    <div className="w-full h-full bg-black rounded-full flex items-center justify-center border-4 border-black">
-                        <span className="text-amber-500 font-black text-xs text-center leading-tight">LDM<br />LN</span>
+                    <div className="w-full h-full bg-slate-900 rounded-full flex items-center justify-center border-4 border-slate-900 overflow-hidden">
+                        <img src={Logo} alt="Logo" className="w-full h-full object-cover" />
                     </div>
                 </div>
             </header>

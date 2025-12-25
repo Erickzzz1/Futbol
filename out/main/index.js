@@ -2,16 +2,28 @@
 const electron = require("electron");
 const path = require("path");
 const utils = require("@electron-toolkit/utils");
+const promises = require("fs/promises");
 const Database = require("better-sqlite3");
 let db = null;
 function getDB() {
   if (!db) {
     const dbPath = path.join(electron.app.getPath("userData"), "torneo.sqlite");
-    console.log("Database path:", dbPath);
-    db = new Database(dbPath);
-    initSchema(db);
+    try {
+      db = new Database(dbPath);
+      initSchema(db);
+    } catch (e) {
+      console.error("Error opening database:", e);
+      throw e;
+    }
   }
   return db;
+}
+function closeDB() {
+  if (db) {
+    console.log("Closing database connection...");
+    db.close();
+    db = null;
+  }
 }
 function initSchema(database) {
   const schema = `
@@ -119,7 +131,10 @@ function initSchema(database) {
   }
 }
 function setupIPC() {
-  const db2 = getDB();
+  const db2 = {
+    prepare: (source) => getDB().prepare(source),
+    transaction: (fn) => getDB().transaction(fn)
+  };
   electron.ipcMain.handle("get-tournaments", () => {
     return db2.prepare("SELECT * FROM tournaments ORDER BY id DESC").all();
   });
@@ -136,6 +151,42 @@ function setupIPC() {
     const stmt = db2.prepare("UPDATE tournaments SET name = ?, type = ?, category = ? WHERE id = ?");
     stmt.run(name, type, category, id);
     return { id, name, type, category };
+  });
+  electron.ipcMain.handle("delete-tournament", (_, id) => {
+    if (!id) return false;
+    const teams = db2.prepare("SELECT id FROM teams WHERE tournament_id = ?").all(id);
+    const teamIds = teams.map((t) => t.id);
+    if (teamIds.length > 0) {
+      const teamIdsStr = teamIds.join(",");
+      const matches = db2.prepare(`SELECT id FROM matches WHERE home_team_id IN (${teamIdsStr}) OR away_team_id IN (${teamIdsStr})`).all();
+      const matchIds = matches.map((m) => m.id);
+      const transaction = db2.transaction(() => {
+        if (matchIds.length > 0) {
+          const matchIdsStr = matchIds.join(",");
+          db2.prepare(`DELETE FROM goals WHERE match_id IN (${matchIdsStr})`).run();
+          db2.prepare(`DELETE FROM fouls WHERE match_id IN (${matchIdsStr})`).run();
+          db2.prepare(`DELETE FROM matches WHERE id IN (${matchIdsStr})`).run();
+        }
+        db2.prepare(`DELETE FROM players WHERE team_id IN (${teamIdsStr})`).run();
+        db2.prepare(`DELETE FROM teams WHERE id IN (${teamIdsStr})`).run();
+        db2.prepare("DELETE FROM tournaments WHERE id = ?").run(id);
+      });
+      try {
+        transaction();
+        return true;
+      } catch (e) {
+        console.error("Delete tournament failed:", e);
+        return false;
+      }
+    } else {
+      try {
+        db2.prepare("DELETE FROM tournaments WHERE id = ?").run(id);
+        return true;
+      } catch (e) {
+        console.error(e);
+        return false;
+      }
+    }
   });
   electron.ipcMain.handle("get-teams", (_, tournamentId) => {
     if (!tournamentId) return [];
@@ -565,6 +616,48 @@ function setupIPC() {
       return false;
     }
   });
+  electron.ipcMain.handle("backup-database", async () => {
+    const dbPath = path.join(electron.app.getPath("userData"), "torneo.sqlite");
+    const { canceled, filePath } = await electron.dialog.showSaveDialog({
+      title: "Guardar Copia de Seguridad",
+      defaultPath: `respaldo-torneo-${(/* @__PURE__ */ new Date()).toISOString().split("T")[0]}.sqlite`,
+      filters: [{ name: "SQLite Database", extensions: ["sqlite", "db"] }]
+    });
+    if (canceled || !filePath) return false;
+    try {
+      await promises.copyFile(dbPath, filePath);
+      return true;
+    } catch (e) {
+      console.error("Backup failed:", e);
+      return false;
+    }
+  });
+  electron.ipcMain.handle("restore-database", async () => {
+    const dbPath = path.join(electron.app.getPath("userData"), "torneo.sqlite");
+    const { canceled, filePaths } = await electron.dialog.showOpenDialog({
+      title: "Seleccionar Archivo de Respaldo",
+      properties: ["openFile"],
+      filters: [{ name: "SQLite Database", extensions: ["sqlite", "db"] }]
+    });
+    if (canceled || filePaths.length === 0) return false;
+    const backupPath = filePaths[0];
+    try {
+      closeDB();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await promises.copyFile(backupPath, dbPath);
+      console.log(`Database restored from ${backupPath}`);
+      getDB();
+      return true;
+    } catch (e) {
+      console.error("Restore failed:", e);
+      try {
+        getDB();
+      } catch (err) {
+        console.error("Critical: Could not re-open DB after failed restore", err);
+      }
+      return false;
+    }
+  });
 }
 function createWindow() {
   const mainWindow = new electron.BrowserWindow({
@@ -576,7 +669,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       sandbox: false
-    }
+    },
+    icon: path.join(__dirname, "../../resources/icon.png")
   });
   mainWindow.on("ready-to-show", () => {
     mainWindow.show();

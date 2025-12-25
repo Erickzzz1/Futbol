@@ -17,6 +17,7 @@ export const api = {
     getTournaments: (): Promise<Tournament[]> => window.electron.ipcRenderer.invoke('get-tournaments'),
     createTournament: (data: { name: string, type: string, category: string }): Promise<Tournament> => window.electron.ipcRenderer.invoke('create-tournament', data),
     updateTournament: (data: Tournament) => window.electron.ipcRenderer.invoke('update-tournament', data),
+    deleteTournament: (id: number) => window.electron.ipcRenderer.invoke('delete-tournament', id),
     getTournamentDetails: (id: number): Promise<Tournament> => window.electron.ipcRenderer.invoke('get-tournament-details', id),
 
     getStandings: (tournamentId: number): Promise<Standing[]> => window.electron.ipcRenderer.invoke('get-standings', tournamentId),
@@ -51,5 +52,8 @@ export const api = {
     generatePlayoffs: (tournamentId: number, stage: 'quarter' | 'semi' | 'final', startDate?: string, startTime?: string) => window.electron.ipcRenderer.invoke('generate-playoffs', { stage, startDate, startTime, tournamentId }),
     resetTournament: (tournamentId: number) => window.electron.ipcRenderer.invoke('reset-tournament', tournamentId),
     swapMatches: (matchId1: number, matchId2: number) => window.electron.ipcRenderer.invoke('swap-matches', { matchId1, matchId2 }),
+
     seedPlayers: (tournamentId: number) => window.electron.ipcRenderer.invoke('seed-players', tournamentId),
+    backupDatabase: () => window.electron.ipcRenderer.invoke('backup-database'),
+    restoreDatabase: () => window.electron.ipcRenderer.invoke('restore-database'),
 };

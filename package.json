@@ -16,13 +16,31 @@
     "build": "npm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps"
   },
+  "build": {
+    "appId": "com.futbol7.manager",
+    "productName": "Futbol 7 Manager",
+    "directories": {
+      "buildResources": "resources"
+    },
+    "win": {
+      "icon": "resources/icon.png",
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Futbol 7 Manager"
+    }
+  },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/utils": "^3.0.0",
     "better-sqlite3": "^9.0.0",
     "lucide-react": "^0.562.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "sonner": "^2.0.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",

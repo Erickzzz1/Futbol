@@ -7,11 +7,24 @@ let db: Database.Database | null = null;
 export function getDB() {
   if (!db) {
     const dbPath = join(app.getPath('userData'), 'torneo.sqlite');
-    console.log('Database path:', dbPath);
-    db = new Database(dbPath);
-    initSchema(db);
+    // console.log('Database path:', dbPath);
+    try {
+      db = new Database(dbPath);
+      initSchema(db);
+    } catch (e) {
+      console.error("Error opening database:", e);
+      throw e;
+    }
   }
   return db;
+}
+
+export function closeDB() {
+  if (db) {
+    console.log("Closing database connection...");
+    db.close();
+    db = null;
+  }
 }
 
 function initSchema(database: Database.Database) {

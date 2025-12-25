@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api';
 import { Tournament } from '../types';
-import { Plus, Edit2, ArrowRight } from 'lucide-react';
+import Logo from '../assets/Icono.png';
+import { Plus, Edit2, ArrowRight, Save, Upload, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { ConfirmModal } from './ConfirmModal';
 
 interface TournamentListProps {
     onSelectTournament: (tournament: Tournament) => void;
@@ -35,6 +38,16 @@ export const TournamentList: React.FC<TournamentListProps> = ({ onSelectTourname
     const [type, setType] = useState(TYPES[0]);
     const [category, setCategory] = useState(CATEGORIES[0].value);
     const [customName, setCustomName] = useState('');
+
+    // Confirm Modal State
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const [confirmConfig, setConfirmConfig] = useState<{
+        title: string;
+        message: string;
+        action: () => void;
+        isDestructive: boolean;
+        confirmText?: string;
+    }>({ title: '', message: '', action: () => { }, isDestructive: false });
 
     useEffect(() => {
         loadTournaments();
@@ -84,7 +97,56 @@ export const TournamentList: React.FC<TournamentListProps> = ({ onSelectTourname
 
         setIsCreating(false);
         loadTournaments();
+        loadTournaments();
     };
+
+    const handleBackup = async () => {
+        const success = await api.backupDatabase();
+        if (success) {
+            toast.success('Copia de seguridad guardada correctamente');
+        }
+    };
+
+    const handleRestore = async () => {
+        setConfirmConfig({
+            title: '¿Restaurar Base de Datos?',
+            message: 'ADVERTENCIA: Esto SOBREESCRIBIRÁ todos los datos actuales por los del archivo de respaldo. Esta acción no se puede deshacer.',
+            isDestructive: true,
+            confirmText: 'Restaurar',
+            action: async () => {
+                const success = await api.restoreDatabase();
+                if (success) {
+                    toast.success('Base de datos restaurada. Reiniciando sistema...');
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                }
+                setConfirmOpen(false);
+            }
+        });
+        setConfirmOpen(true);
+    };
+
+    const handleDelete = (t: Tournament, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setConfirmConfig({
+            title: '¿Eliminar Torneo?',
+            message: `Vas a eliminar "${t.name}". Se borrarán permanentemente sus equipos, jugadores y partidos.`,
+            isDestructive: true,
+            confirmText: 'Eliminar',
+            action: async () => {
+                const success = await api.deleteTournament(t.id);
+                if (success) {
+                    toast.success('Torneo eliminado correctamente');
+                    loadTournaments();
+                } else {
+                    toast.error('Error al eliminar el torneo');
+                }
+                setConfirmOpen(false);
+            }
+        });
+        setConfirmOpen(true);
+    }
 
     return (
         <div className="min-h-screen bg-slate-900 text-gray-100 p-8 font-sans">
@@ -97,9 +159,31 @@ export const TournamentList: React.FC<TournamentListProps> = ({ onSelectTourname
                         Selecciona o Crea uno Nuevo
                     </p>
                 </div>
-                <div className="bg-gradient-to-br from-amber-400 to-yellow-600 rounded-full p-1 w-20 h-20 shadow-lg shadow-amber-500/20">
-                    <div className="w-full h-full bg-black rounded-full flex items-center justify-center border-4 border-black">
-                        <span className="text-amber-500 font-black text-xs text-center leading-tight">LDM<br />App</span>
+
+                <div className="flex items-center gap-4">
+                    <button
+                        onClick={handleBackup}
+                        className="bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 px-4 py-2 rounded-lg border border-slate-700 transition shadow-lg flex items-center gap-2 group font-bold text-sm"
+                        title="Crear Respaldo Completo"
+                    >
+                        <Save className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                        RESPALDAR
+                    </button>
+                    <button
+                        onClick={handleRestore}
+                        className="bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 px-4 py-2 rounded-lg border border-slate-700 transition shadow-lg flex items-center gap-2 group font-bold text-sm"
+                        title="Cargar Respaldo"
+                    >
+                        <Upload className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                        IMPORTAR
+                    </button>
+
+                    <div className="h-10 w-px bg-slate-700 mx-2"></div>
+
+                    <div className="bg-gradient-to-br from-amber-400 to-yellow-600 rounded-full p-1 w-20 h-20 shadow-lg shadow-amber-500/20">
+                        <div className="w-full h-full bg-slate-900 rounded-full flex items-center justify-center border-4 border-slate-900 overflow-hidden">
+                            <img src={Logo} alt="Logo" className="w-full h-full object-cover" />
+                        </div>
                     </div>
                 </div>
             </header>
@@ -130,6 +214,13 @@ export const TournamentList: React.FC<TournamentListProps> = ({ onSelectTourname
                                 title="Editar nombre/tipo"
                             >
                                 <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={(e) => handleDelete(t, e)}
+                                className="absolute top-4 right-14 text-slate-600 hover:text-red-500 p-2 rounded-full hover:bg-slate-900 transition-colors z-10"
+                                title="Eliminar Torneo"
+                            >
+                                <Trash2 className="w-4 h-4" />
                             </button>
                             <div>
                                 <h3 className="text-2xl font-black mb-3 text-white uppercase tracking-tight group-hover:text-amber-400 transition-colors pr-8">{t.name}</h3>
@@ -226,6 +317,16 @@ export const TournamentList: React.FC<TournamentListProps> = ({ onSelectTourname
                     </div>
                 </div>
             )}
+
+            <ConfirmModal
+                isOpen={confirmOpen}
+                title={confirmConfig.title}
+                message={confirmConfig.message}
+                onConfirm={confirmConfig.action}
+                onCancel={() => setConfirmOpen(false)}
+                isDestructive={confirmConfig.isDestructive}
+                confirmText={confirmConfig.confirmText}
+            />
         </div>
     );
 };

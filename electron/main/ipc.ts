@@ -1,6 +1,7 @@
-import { app, BrowserWindow, ipcMain, screen } from 'electron';
+import { app, BrowserWindow, ipcMain, screen, dialog } from 'electron';
+import { copyFile } from 'fs/promises';
 import { join } from 'path';
-import { getDB } from './database';
+import { getDB, closeDB } from './database';
 
 interface Match {
     id: number;
@@ -22,7 +23,11 @@ interface Team {
 }
 
 export function setupIPC() {
-    const db = getDB();
+    // Fix: Use a proxy to always get the current DB instance (handles close/re-open on restore)
+    const db = {
+        prepare: (source: string) => getDB().prepare(source),
+        transaction: <T>(fn: (...args: any[]) => T) => getDB().transaction(fn)
+    };
 
     // --- Tournaments ---
     ipcMain.handle('get-tournaments', () => {
@@ -44,6 +49,45 @@ export function setupIPC() {
         const stmt = db.prepare('UPDATE tournaments SET name = ?, type = ?, category = ? WHERE id = ?');
         stmt.run(name, type, category, id);
         return { id, name, type, category };
+    });
+
+    ipcMain.handle('delete-tournament', (_, id) => {
+        if (!id) return false;
+
+        // Cascade delete: Goals/Fouls -> Matches -> Players -> Teams -> Tournament
+
+        // 1. Get all teams
+        const teams = db.prepare('SELECT id FROM teams WHERE tournament_id = ?').all(id) as { id: number }[];
+        const teamIds = teams.map(t => t.id);
+
+        if (teamIds.length > 0) {
+            const teamIdsStr = teamIds.join(',');
+
+            // 2. Get matches involving these teams
+            const matches = db.prepare(`SELECT id FROM matches WHERE home_team_id IN (${teamIdsStr}) OR away_team_id IN (${teamIdsStr})`).all() as { id: number }[];
+            const matchIds = matches.map(m => m.id);
+
+            const transaction = db.transaction(() => {
+                if (matchIds.length > 0) {
+                    const matchIdsStr = matchIds.join(',');
+                    db.prepare(`DELETE FROM goals WHERE match_id IN (${matchIdsStr})`).run();
+                    db.prepare(`DELETE FROM fouls WHERE match_id IN (${matchIdsStr})`).run();
+                    db.prepare(`DELETE FROM matches WHERE id IN (${matchIdsStr})`).run();
+                }
+
+                db.prepare(`DELETE FROM players WHERE team_id IN (${teamIdsStr})`).run();
+                db.prepare(`DELETE FROM teams WHERE id IN (${teamIdsStr})`).run();
+                db.prepare('DELETE FROM tournaments WHERE id = ?').run(id);
+            });
+
+            try { transaction(); return true; } catch (e) { console.error("Delete tournament failed:", e); return false; }
+        } else {
+            // No teams, just delete tournament
+            try {
+                db.prepare('DELETE FROM tournaments WHERE id = ?').run(id);
+                return true;
+            } catch (e) { console.error(e); return false; }
+        }
     });
 
     // --- Teams ---
@@ -527,5 +571,58 @@ export function setupIPC() {
         });
 
         try { transaction(); return true; } catch (e) { console.error(e); return false; }
+    });
+
+    ipcMain.handle('backup-database', async () => {
+        const dbPath = join(app.getPath('userData'), 'torneo.sqlite');
+        const { canceled, filePath } = await dialog.showSaveDialog({
+            title: 'Guardar Copia de Seguridad',
+            defaultPath: `respaldo-torneo-${new Date().toISOString().split('T')[0]}.sqlite`,
+            filters: [{ name: 'SQLite Database', extensions: ['sqlite', 'db'] }]
+        });
+
+        if (canceled || !filePath) return false;
+
+        try {
+            await copyFile(dbPath, filePath);
+            return true;
+        } catch (e) {
+            console.error('Backup failed:', e);
+            return false;
+        }
+    });
+
+    ipcMain.handle('restore-database', async () => {
+        const dbPath = join(app.getPath('userData'), 'torneo.sqlite');
+        const { canceled, filePaths } = await dialog.showOpenDialog({
+            title: 'Seleccionar Archivo de Respaldo',
+            properties: ['openFile'],
+            filters: [{ name: 'SQLite Database', extensions: ['sqlite', 'db'] }]
+        });
+
+        if (canceled || filePaths.length === 0) return false;
+        const backupPath = filePaths[0];
+
+        try {
+            // 1. Close existing connection
+            closeDB();
+
+            // 2. Wait a bit to ensure lock is released (optional but safe)
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // 3. Overwrite file
+            await copyFile(backupPath, dbPath);
+            console.log(`Database restored from ${backupPath}`);
+
+            // 4. Re-open to verify/migrations
+            getDB();
+
+            return true;
+        } catch (e) {
+            console.error('Restore failed:', e);
+            // Attempt to re-open if it failed so app doesn't crash on next usage
+            try { getDB(); } catch (err) { console.error("Critical: Could not re-open DB after failed restore", err); }
+            return false;
+        }
     });
 }
