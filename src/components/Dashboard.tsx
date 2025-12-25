@@ -140,7 +140,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tournamentId }) => {
                 </div>
             </header>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <div id="dashboard-content" className="grid grid-cols-1 lg:grid-cols-12 gap-8 bg-slate-900 p-2">
                 {/* Left Column: Standings (8 cols) */}
                 <div className="lg:col-span-8 flex flex-col gap-8">
                     <div className="bg-slate-800 rounded-xl overflow-hidden shadow-2xl border border-slate-700">

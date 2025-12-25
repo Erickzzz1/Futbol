@@ -77,13 +77,35 @@ function initSchema(database: Database.Database) {
       FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
     );
 
-    CREATE TABLE IF NOT EXISTS fouls (
+    CREATE TABLE IF NOT EXISTS cards (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       match_id INTEGER,
       player_id INTEGER,
+      type TEXT CHECK(type IN ('yellow', 'red')),
       count INTEGER DEFAULT 1,
       FOREIGN KEY(match_id) REFERENCES matches(id) ON DELETE CASCADE,
       FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tournament_id INTEGER,
+      team_id INTEGER,
+      concept TEXT,
+      amount INTEGER,
+      status TEXT CHECK(status IN ('pending', 'paid')) DEFAULT 'pending',
+      date_paid TEXT,
+      FOREIGN KEY(tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE,
+      FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tournament_id INTEGER,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      FOREIGN KEY(tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE,
+      UNIQUE(tournament_id, key)
     );
   `;
   database.exec(schema);
@@ -131,17 +153,39 @@ function initSchema(database: Database.Database) {
   try {
     const columns = database.prepare("PRAGMA table_info(players)").all() as any[];
     const hasCustomGoals = columns.some(c => c.name === 'custom_goals');
-    const hasCustomFouls = columns.some(c => c.name === 'custom_fouls');
+
+    // Check if we need to migrate from 'custom_fouls' to card system or just keep it for legacy
+    // For simplicity, we'll keep custom_fouls but treat it as legacy or generic fouls if needed, 
+    // but ideally we should add custom_yellow and custom_red.
+
+    // Let's add custom_yellow and custom_red
+    const hasCustomYellow = columns.some(c => c.name === 'custom_yellow');
 
     if (!hasCustomGoals) {
       database.prepare("ALTER TABLE players ADD COLUMN custom_goals INTEGER DEFAULT 0").run();
-      console.log("Migrated: Added 'custom_goals' column to players");
     }
-    if (!hasCustomFouls) {
-      database.prepare("ALTER TABLE players ADD COLUMN custom_fouls INTEGER DEFAULT 0").run();
-      console.log("Migrated: Added 'custom_fouls' column to players");
+
+    if (!hasCustomYellow) {
+      database.prepare("ALTER TABLE players ADD COLUMN custom_yellow INTEGER DEFAULT 0").run();
+      database.prepare("ALTER TABLE players ADD COLUMN custom_red INTEGER DEFAULT 0").run();
+      console.log("Migrated: Added 'custom_yellow' and 'custom_red' to players");
     }
+
   } catch (e) {
     console.error("Migration check failed (players):", e);
+  }
+
+  // Drop old fouls table if exists (optional cleanup)
+  try {
+    // We check if 'cards' exists (it does from schema exec) but maybe 'fouls' still exists
+    const tableCheck = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='fouls'").get();
+    if (tableCheck) {
+      // Migration: Convert old fouls to Yellow Cards? Or just drop?
+      // Let's just drop for now as per plan implies fresh start for cards
+      database.prepare("DROP TABLE fouls").run();
+      console.log("Migrated: Dropped legacy 'fouls' table");
+    }
+  } catch (e) {
+    console.error("Migration/Cleanup fouls table failed:", e);
   }
 }

@@ -75,13 +75,35 @@ function initSchema(database) {
       FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
     );
 
-    CREATE TABLE IF NOT EXISTS fouls (
+    CREATE TABLE IF NOT EXISTS cards (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       match_id INTEGER,
       player_id INTEGER,
+      type TEXT CHECK(type IN ('yellow', 'red')),
       count INTEGER DEFAULT 1,
       FOREIGN KEY(match_id) REFERENCES matches(id) ON DELETE CASCADE,
       FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tournament_id INTEGER,
+      team_id INTEGER,
+      concept TEXT,
+      amount INTEGER,
+      status TEXT CHECK(status IN ('pending', 'paid')) DEFAULT 'pending',
+      date_paid TEXT,
+      FOREIGN KEY(tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE,
+      FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tournament_id INTEGER,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      FOREIGN KEY(tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE,
+      UNIQUE(tournament_id, key)
     );
   `;
   database.exec(schema);
@@ -117,17 +139,26 @@ function initSchema(database) {
   try {
     const columns = database.prepare("PRAGMA table_info(players)").all();
     const hasCustomGoals = columns.some((c) => c.name === "custom_goals");
-    const hasCustomFouls = columns.some((c) => c.name === "custom_fouls");
+    const hasCustomYellow = columns.some((c) => c.name === "custom_yellow");
     if (!hasCustomGoals) {
       database.prepare("ALTER TABLE players ADD COLUMN custom_goals INTEGER DEFAULT 0").run();
-      console.log("Migrated: Added 'custom_goals' column to players");
     }
-    if (!hasCustomFouls) {
-      database.prepare("ALTER TABLE players ADD COLUMN custom_fouls INTEGER DEFAULT 0").run();
-      console.log("Migrated: Added 'custom_fouls' column to players");
+    if (!hasCustomYellow) {
+      database.prepare("ALTER TABLE players ADD COLUMN custom_yellow INTEGER DEFAULT 0").run();
+      database.prepare("ALTER TABLE players ADD COLUMN custom_red INTEGER DEFAULT 0").run();
+      console.log("Migrated: Added 'custom_yellow' and 'custom_red' to players");
     }
   } catch (e) {
     console.error("Migration check failed (players):", e);
+  }
+  try {
+    const tableCheck = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='fouls'").get();
+    if (tableCheck) {
+      database.prepare("DROP TABLE fouls").run();
+      console.log("Migrated: Dropped legacy 'fouls' table");
+    }
+  } catch (e) {
+    console.error("Migration/Cleanup fouls table failed:", e);
   }
 }
 function setupIPC() {
@@ -164,7 +195,7 @@ function setupIPC() {
         if (matchIds.length > 0) {
           const matchIdsStr = matchIds.join(",");
           db2.prepare(`DELETE FROM goals WHERE match_id IN (${matchIdsStr})`).run();
-          db2.prepare(`DELETE FROM fouls WHERE match_id IN (${matchIdsStr})`).run();
+          db2.prepare(`DELETE FROM cards WHERE match_id IN (${matchIdsStr})`).run();
           db2.prepare(`DELETE FROM matches WHERE id IN (${matchIdsStr})`).run();
         }
         db2.prepare(`DELETE FROM players WHERE team_id IN (${teamIdsStr})`).run();
@@ -216,11 +247,12 @@ function setupIPC() {
             p.*, 
             t.name as team_name,
             COALESCE(SUM(g.count), 0) as match_goals,
-            COALESCE(SUM(f.count), 0) as match_fouls
+            COALESCE(SUM(CASE WHEN c.type = 'yellow' THEN c.count ELSE 0 END), 0) as match_yellow,
+            COALESCE(SUM(CASE WHEN c.type = 'red' THEN c.count ELSE 0 END), 0) as match_red
         FROM players p
         LEFT JOIN teams t ON p.team_id = t.id
         LEFT JOIN goals g ON p.id = g.player_id
-        LEFT JOIN fouls f ON p.id = f.player_id
+        LEFT JOIN cards c ON p.id = c.player_id
         ${teamId ? "WHERE p.team_id = ?" : ""}
         GROUP BY p.id
         ORDER BY t.name, p.name
@@ -229,7 +261,8 @@ function setupIPC() {
     return players.map((p) => ({
       ...p,
       goals: p.match_goals + (p.custom_goals || 0),
-      fouls: p.match_fouls + (p.custom_fouls || 0)
+      yellow_cards: p.match_yellow + (p.custom_yellow || 0),
+      red_cards: p.match_red + (p.custom_red || 0)
     }));
   });
   electron.ipcMain.handle("add-player", (_, { name, team_id, number }) => {
@@ -237,13 +270,13 @@ function setupIPC() {
     const info = stmt.run(name, team_id, number);
     return { id: info.lastInsertRowid, name, team_id, number };
   });
-  electron.ipcMain.handle("update-player", (_, { id, name, number, team_id, custom_goals, custom_fouls }) => {
+  electron.ipcMain.handle("update-player", (_, { id, name, number, team_id, custom_goals, custom_yellow, custom_red }) => {
     const stmt = db2.prepare(`
         UPDATE players 
-        SET name = ?, number = ?, team_id = ?, custom_goals = ?, custom_fouls = ? 
+        SET name = ?, number = ?, team_id = ?, custom_goals = ?, custom_yellow = ?, custom_red = ?
         WHERE id = ?
      `);
-    stmt.run(name, number, team_id, custom_goals || 0, custom_fouls || 0, id);
+    stmt.run(name, number, team_id, custom_goals || 0, custom_yellow || 0, custom_red || 0, id);
     return true;
   });
   electron.ipcMain.handle("delete-player", (_, id) => {
@@ -276,22 +309,22 @@ function setupIPC() {
     const info = stmt.run(home_team_id, away_team_id, matchday, date, stage || "regular");
     return info.lastInsertRowid;
   });
-  electron.ipcMain.handle("update-match-score", (_, { id, homeScore, awayScore, scorers, foulers }) => {
+  electron.ipcMain.handle("update-match-score", (_, { id, homeScore, awayScore, scorers, cards }) => {
     const updateMatch = db2.prepare(`
         UPDATE matches 
         SET home_score = ?, away_score = ?, status = 'played' 
         WHERE id = ?
     `);
     const insertGoal = db2.prepare("INSERT INTO goals (match_id, player_id, count) VALUES (?, ?, ?)");
-    const insertFoul = db2.prepare("INSERT INTO fouls (match_id, player_id, count) VALUES (?, ?, ?)");
+    const insertCard = db2.prepare("INSERT INTO cards (match_id, player_id, type, count) VALUES (?, ?, ?, ?)");
     const deleteGoals = db2.prepare("DELETE FROM goals WHERE match_id = ?");
-    const deleteFouls = db2.prepare("DELETE FROM fouls WHERE match_id = ?");
+    const deleteCards = db2.prepare("DELETE FROM cards WHERE match_id = ?");
     const transaction = db2.transaction(() => {
       updateMatch.run(homeScore, awayScore, id);
       deleteGoals.run(id);
-      deleteFouls.run(id);
+      deleteCards.run(id);
       if (scorers) for (const s of scorers) insertGoal.run(id, s.playerId, s.count);
-      if (foulers) for (const s of foulers) insertFoul.run(id, s.playerId, s.count);
+      if (cards) for (const c of cards) insertCard.run(id, c.playerId, c.type, c.count);
     });
     try {
       transaction();
@@ -471,6 +504,15 @@ function setupIPC() {
   });
   electron.ipcMain.handle("get-standings", (_, tournamentId) => {
     if (!tournamentId) return [];
+    const settingsRaw = db2.prepare("SELECT key, value FROM settings WHERE tournament_id = ?").all(tournamentId);
+    const settings = settingsRaw.reduce((acc, curr) => ({ ...acc, [curr.key]: Number(curr.value) }), {
+      points_win: 3,
+      points_draw: 1,
+      points_loss: 0
+    });
+    const ptsWin = settings.points_win;
+    const ptsDraw = settings.points_draw;
+    const ptsLoss = settings.points_loss;
     const teams = db2.prepare("SELECT * FROM teams WHERE tournament_id = ?").all(tournamentId);
     const matches = db2.prepare(`
             SELECT m.* FROM matches m
@@ -503,17 +545,19 @@ function setupIPC() {
         away.GC += m.home_score;
         if (m.home_score > m.away_score) {
           home.PG++;
-          home.PTS += 3;
+          home.PTS += ptsWin;
           away.PP++;
+          away.PTS += ptsLoss;
         } else if (m.home_score < m.away_score) {
           away.PG++;
-          away.PTS += 3;
+          away.PTS += ptsWin;
           home.PP++;
+          home.PTS += ptsLoss;
         } else {
           home.PE++;
-          home.PTS += 1;
+          home.PTS += ptsDraw;
           away.PE++;
-          away.PTS += 1;
+          away.PTS += ptsDraw;
         }
       }
     }
@@ -525,6 +569,17 @@ function setupIPC() {
       if (b.DG !== a.DG) return b.DG - a.DG;
       return b.GF - a.GF;
     });
+  });
+  electron.ipcMain.handle("get-settings", (_, tournamentId) => {
+    if (!tournamentId) return {};
+    const rows = db2.prepare("SELECT key, value FROM settings WHERE tournament_id = ?").all(tournamentId);
+    const defaults = { points_win: "3", points_draw: "1", points_loss: "0" };
+    const stored = rows.reduce((acc, curr) => ({ ...acc, [curr.key]: curr.value }), {});
+    return { ...defaults, ...stored };
+  });
+  electron.ipcMain.handle("update-setting", (_, { tournamentId, key, value }) => {
+    db2.prepare("INSERT INTO settings (tournament_id, key, value) VALUES (?, ?, ?) ON CONFLICT(tournament_id, key) DO UPDATE SET value = ?").run(tournamentId, key, String(value), String(value));
+    return true;
   });
   electron.ipcMain.handle("get-top-scorers", (_, tournamentId) => {
     if (!tournamentId) return [];
@@ -544,6 +599,52 @@ function setupIPC() {
         LIMIT 10
      `).all(tournamentId);
   });
+  electron.ipcMain.handle("get-top-cards", (_, tournamentId) => {
+    if (!tournamentId) return [];
+    return db2.prepare(`
+        SELECT 
+            p.name, 
+            t.name as team, 
+            (COALESCE(SUM(CASE WHEN c.type = 'yellow' THEN c.count ELSE 0 END), 0) + p.custom_yellow) as yellow,
+            (COALESCE(SUM(CASE WHEN c.type = 'red' THEN c.count ELSE 0 END), 0) + p.custom_red) as red
+        FROM players p
+        JOIN teams t ON p.team_id = t.id
+        LEFT JOIN cards c ON p.id = c.player_id
+        LEFT JOIN matches m ON c.match_id = m.id
+        WHERE t.tournament_id = ? AND (m.stage = 'regular' OR m.stage IS NULL)
+        GROUP BY p.id
+        HAVING yellow > 0 OR red > 0
+        ORDER BY red DESC, yellow DESC
+        LIMIT 10
+     `).all(tournamentId);
+  });
+  electron.ipcMain.handle("get-treasury-summary", (_, tournamentId) => {
+    if (!tournamentId) return [];
+    const teams = db2.prepare("SELECT id, name FROM teams WHERE tournament_id = ?").all(tournamentId);
+    const payments = db2.prepare("SELECT * FROM payments WHERE tournament_id = ?").all(tournamentId);
+    return teams.map((t) => {
+      const teamPayments = payments.filter((p) => p.team_id === t.id);
+      const totalDebt = teamPayments.reduce((acc, p) => acc + (p.status === "pending" ? p.amount : 0), 0);
+      return {
+        ...t,
+        totalDebt,
+        payments: teamPayments
+      };
+    });
+  });
+  electron.ipcMain.handle("add-payment-obligation", (_, { tournamentId, teamId, concept, amount }) => {
+    db2.prepare("INSERT INTO payments (tournament_id, team_id, concept, amount, status) VALUES (?, ?, ?, ?, 'pending')").run(tournamentId, teamId, concept, amount);
+    return true;
+  });
+  electron.ipcMain.handle("update-payment-status", (_, { id, status }) => {
+    const dateStr = status === "paid" ? (/* @__PURE__ */ new Date()).toISOString() : null;
+    db2.prepare("UPDATE payments SET status = ?, date_paid = ? WHERE id = ?").run(status, dateStr, id);
+    return true;
+  });
+  electron.ipcMain.handle("delete-payment", (_, id) => {
+    db2.prepare("DELETE FROM payments WHERE id = ?").run(id);
+    return true;
+  });
   electron.ipcMain.handle("reset-tournament", (_, tournamentId) => {
     if (!tournamentId) return false;
     const teams = db2.prepare("SELECT id FROM teams WHERE tournament_id = ?").all(tournamentId);
@@ -554,10 +655,10 @@ function setupIPC() {
     const transaction = db2.transaction(() => {
       if (matchIds.length > 0) {
         db2.prepare(`DELETE FROM goals WHERE match_id IN (${matchIds})`).run();
-        db2.prepare(`DELETE FROM fouls WHERE match_id IN (${matchIds})`).run();
+        db2.prepare(`DELETE FROM cards WHERE match_id IN (${matchIds})`).run();
         db2.prepare(`DELETE FROM matches WHERE id IN (${matchIds})`).run();
       }
-      db2.prepare(`UPDATE players SET custom_goals = 0, custom_fouls = 0 WHERE team_id IN (${teamIds})`).run();
+      db2.prepare(`UPDATE players SET custom_goals = 0, custom_yellow = 0, custom_red = 0 WHERE team_id IN (${teamIds})`).run();
     });
     try {
       transaction();

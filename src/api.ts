@@ -22,6 +22,17 @@ export const api = {
 
     getStandings: (tournamentId: number): Promise<Standing[]> => window.electron.ipcRenderer.invoke('get-standings', tournamentId),
     getTopScorers: (tournamentId: number): Promise<Scorer[]> => window.electron.ipcRenderer.invoke('get-top-scorers', tournamentId),
+    getTopCards: (tournamentId: number): Promise<{ name: string, team: string, yellow: number, red: number }[]> => window.electron.ipcRenderer.invoke('get-top-cards', tournamentId),
+
+    // Treasury
+    getTreasurySummary: (tournamentId: number): Promise<any[]> => window.electron.ipcRenderer.invoke('get-treasury-summary', tournamentId),
+    addPaymentObligation: (data: { tournamentId: number, teamId: number, concept: string, amount: number }) => window.electron.ipcRenderer.invoke('add-payment-obligation', data),
+    updatePaymentStatus: (id: number, status: 'pending' | 'paid') => window.electron.ipcRenderer.invoke('update-payment-status', { id, status }),
+    deletePayment: (id: number) => window.electron.ipcRenderer.invoke('delete-payment', id),
+
+    // Settings
+    getSettings: (tournamentId: number): Promise<Record<string, string>> => window.electron.ipcRenderer.invoke('get-settings', tournamentId),
+    updateSetting: (tournamentId: number, key: string, value: string | number) => window.electron.ipcRenderer.invoke('update-setting', { tournamentId, key, value }),
 
     // Updated filters
     getMatches: (tournamentId: number, matchday?: number, stage?: string): Promise<Match[]> => window.electron.ipcRenderer.invoke('get-matches', { tournamentId, matchday, stage }),
@@ -44,8 +55,8 @@ export const api = {
         homeScore: number,
         awayScore: number,
         scorers: { playerId: number, count: number }[],
-        foulers: { playerId: number, count: number }[]
-    ) => window.electron.ipcRenderer.invoke('update-match-score', { id, homeScore, awayScore, scorers, foulers }),
+        cards: { playerId: number, type: 'yellow' | 'red', count: number }[]
+    ) => window.electron.ipcRenderer.invoke('update-match-score', { id, homeScore, awayScore, scorers, cards }),
 
     // Automation
     generateFixture: (tournamentId: number, options?: { startDate: string, startTime: string, matchDuration: number, matchInterval: number }) => window.electron.ipcRenderer.invoke('generate-fixture', { ...options, tournamentId }),

@@ -23,10 +23,21 @@ export const AdminResults: React.FC<AdminResultsProps> = ({ matches, teams, play
     const [homeScore, setHomeScore] = useState(0);
     const [awayScore, setAwayScore] = useState(0);
     const [scorers, setScorers] = useState<{ playerId: number, count: number }[]>([]);
-    const [foulers, setFoulers] = useState<{ playerId: number, count: number }[]>([]);
+    const [cards, setCards] = useState<{ playerId: number, type: 'yellow' | 'red', count: number }[]>([]);
 
     const availableMatchdays = Array.from(new Set(matches.filter(m => m.stage === 'regular').map(m => m.matchday))).sort((a, b) => a - b);
     const totalMatchdays = availableMatchdays.length > 0 ? Math.max(...availableMatchdays) : 0;
+
+    // Auto-Select Current Matchday on init
+    React.useEffect(() => {
+        if (resultFilterMatchday === 0 && availableMatchdays.length > 0) {
+            // Find the first matchday with pending matches
+            const pendingMatchday = availableMatchdays.find(d => matches.some(m => m.matchday === d && m.stage === 'regular' && m.status === 'scheduled'));
+            // If there's a pending matchday, select it. Otherwise select the last one.
+            if (pendingMatchday) setResultFilterMatchday(pendingMatchday);
+            else setResultFilterMatchday(availableMatchdays[availableMatchdays.length - 1]);
+        }
+    }, [matches, availableMatchdays]);
 
     const filteredMatches = matches.filter(m => {
         if (m.status !== 'scheduled') return false; // Only show pending/scheduled
@@ -52,7 +63,7 @@ export const AdminResults: React.FC<AdminResultsProps> = ({ matches, teams, play
                     date: d.toISOString(),
                     stage: 'regular'
                 });
-                await api.updateMatchScore(matchId, homeScore, awayScore, scorers, foulers);
+                await api.updateMatchScore(matchId, homeScore, awayScore, scorers, cards);
                 toast.success('Partido Registrado y Calculado');
                 resetMatchEntry();
                 onUpdate();
@@ -62,7 +73,7 @@ export const AdminResults: React.FC<AdminResultsProps> = ({ matches, teams, play
             }
         } else {
             if (!selectedMatch) return;
-            await api.updateMatchScore(selectedMatch.id, homeScore, awayScore, scorers, foulers);
+            await api.updateMatchScore(selectedMatch.id, homeScore, awayScore, scorers, cards);
             toast.success('Resultado Guardado');
             resetMatchEntry();
             onUpdate();
@@ -73,7 +84,7 @@ export const AdminResults: React.FC<AdminResultsProps> = ({ matches, teams, play
         setSelectedMatch(null);
         setIsNewMatchMode(false);
         setScorers([]);
-        setFoulers([]);
+        setCards([]);
         setHomeScore(0);
         setAwayScore(0);
         setEntryHomeId(0);
@@ -117,23 +128,23 @@ export const AdminResults: React.FC<AdminResultsProps> = ({ matches, teams, play
         }
     };
 
-    const addFoul = (playerId: number) => {
-        const existing = foulers.find(s => s.playerId === playerId);
+    const addCard = (playerId: number, type: 'yellow' | 'red') => {
+        const existing = cards.find(c => c.playerId === playerId && c.type === type);
         if (existing) {
-            setFoulers(foulers.map(s => s.playerId === playerId ? { ...s, count: s.count + 1 } : s));
+            setCards(cards.map(c => (c.playerId === playerId && c.type === type) ? { ...c, count: c.count + 1 } : c));
         } else {
-            setFoulers([...foulers, { playerId, count: 1 }]);
+            setCards([...cards, { playerId, type, count: 1 }]);
         }
     }
 
-    const removeFoul = (playerId: number) => {
-        const existing = foulers.find(s => s.playerId === playerId);
+    const removeCard = (playerId: number, type: 'yellow' | 'red') => {
+        const existing = cards.find(c => c.playerId === playerId && c.type === type);
         if (!existing) return;
 
         if (existing.count > 1) {
-            setFoulers(foulers.map(s => s.playerId === playerId ? { ...s, count: s.count - 1 } : s));
+            setCards(cards.map(c => (c.playerId === playerId && c.type === type) ? { ...c, count: c.count - 1 } : c));
         } else {
-            setFoulers(foulers.filter(s => s.playerId !== playerId));
+            setCards(cards.filter(c => !(c.playerId === playerId && c.type === type)));
         }
     }
 
@@ -242,9 +253,13 @@ export const AdminResults: React.FC<AdminResultsProps> = ({ matches, teams, play
                                             <button onClick={() => removeGoal(currentHomeId, p.id)} className="w-8 h-8 flex items-center justify-center text-emerald-600 hover:text-emerald-400 font-bold border-r border-emerald-900/50 hover:bg-emerald-900/50 rounded-l-full transition"><Minus className="w-4 h-4" /></button>
                                             <button onClick={() => addGoal(currentHomeId, p.id)} className="w-8 h-8 flex items-center justify-center text-emerald-400 hover:text-white font-bold hover:bg-emerald-600 rounded-r-full transition"><Goal className="w-4 h-4" /></button>
                                         </div>
-                                        <div className="flex bg-orange-900/40 rounded-full border border-orange-900/50">
-                                            <button onClick={() => removeFoul(p.id)} className="w-8 h-8 flex items-center justify-center text-orange-600 hover:text-orange-400 font-bold border-r border-orange-900/50 hover:bg-orange-900/50 rounded-l-full transition"><Minus className="w-4 h-4" /></button>
-                                            <button onClick={() => addFoul(p.id)} className="w-8 h-8 flex items-center justify-center text-orange-400 hover:text-white font-bold hover:bg-orange-600 rounded-r-full transition"><Square className="w-4 h-4 fill-current" /></button>
+                                        <div className="flex bg-yellow-900/40 rounded-full border border-yellow-900/50 mr-1">
+                                            <button onClick={() => removeCard(p.id, 'yellow')} className="w-8 h-8 flex items-center justify-center text-yellow-600 hover:text-yellow-400 font-bold border-r border-yellow-900/50 hover:bg-yellow-900/50 rounded-l-full transition"><Minus className="w-3 h-3" /></button>
+                                            <button onClick={() => addCard(p.id, 'yellow')} className="w-8 h-8 flex items-center justify-center text-yellow-400 hover:text-white font-bold hover:bg-yellow-600 rounded-r-full transition"><Square className="w-3 h-3 fill-current" /></button>
+                                        </div>
+                                        <div className="flex bg-red-900/40 rounded-full border border-red-900/50">
+                                            <button onClick={() => removeCard(p.id, 'red')} className="w-8 h-8 flex items-center justify-center text-red-600 hover:text-red-400 font-bold border-r border-red-900/50 hover:bg-red-900/50 rounded-l-full transition"><Minus className="w-3 h-3" /></button>
+                                            <button onClick={() => addCard(p.id, 'red')} className="w-8 h-8 flex items-center justify-center text-red-400 hover:text-white font-bold hover:bg-red-600 rounded-r-full transition"><Square className="w-3 h-3 fill-current" /></button>
                                         </div>
                                     </div>
                                 </div>))}</div>
@@ -258,9 +273,13 @@ export const AdminResults: React.FC<AdminResultsProps> = ({ matches, teams, play
                                             <button onClick={() => removeGoal(currentAwayId, p.id)} className="w-8 h-8 flex items-center justify-center text-emerald-600 hover:text-emerald-400 font-bold border-r border-emerald-900/50 hover:bg-emerald-900/50 rounded-l-full transition"><Minus className="w-4 h-4" /></button>
                                             <button onClick={() => addGoal(currentAwayId, p.id)} className="w-8 h-8 flex items-center justify-center text-emerald-400 hover:text-white font-bold hover:bg-emerald-600 rounded-r-full transition"><Goal className="w-4 h-4" /></button>
                                         </div>
-                                        <div className="flex bg-orange-900/40 rounded-full border border-orange-900/50">
-                                            <button onClick={() => removeFoul(p.id)} className="w-8 h-8 flex items-center justify-center text-orange-600 hover:text-orange-400 font-bold border-r border-orange-900/50 hover:bg-orange-900/50 rounded-l-full transition">-</button>
-                                            <button onClick={() => addFoul(p.id)} className="w-8 h-8 flex items-center justify-center text-orange-400 hover:text-white font-bold hover:bg-orange-600 rounded-r-full transition">🟧</button>
+                                        <div className="flex bg-yellow-900/40 rounded-full border border-yellow-900/50 mr-1">
+                                            <button onClick={() => removeCard(p.id, 'yellow')} className="w-8 h-8 flex items-center justify-center text-yellow-600 hover:text-yellow-400 font-bold border-r border-yellow-900/50 hover:bg-yellow-900/50 rounded-l-full transition"><Minus className="w-3 h-3" /></button>
+                                            <button onClick={() => addCard(p.id, 'yellow')} className="w-8 h-8 flex items-center justify-center text-yellow-400 hover:text-white font-bold hover:bg-yellow-600 rounded-r-full transition"><Square className="w-3 h-3 fill-current" /></button>
+                                        </div>
+                                        <div className="flex bg-red-900/40 rounded-full border border-red-900/50">
+                                            <button onClick={() => removeCard(p.id, 'red')} className="w-8 h-8 flex items-center justify-center text-red-600 hover:text-red-400 font-bold border-r border-red-900/50 hover:bg-red-900/50 rounded-l-full transition"><Minus className="w-3 h-3" /></button>
+                                            <button onClick={() => addCard(p.id, 'red')} className="w-8 h-8 flex items-center justify-center text-red-400 hover:text-white font-bold hover:bg-red-600 rounded-r-full transition"><Square className="w-3 h-3 fill-current" /></button>
                                         </div>
                                     </div>
                                 </div>))}</div>
@@ -271,7 +290,7 @@ export const AdminResults: React.FC<AdminResultsProps> = ({ matches, teams, play
                         <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Resumen:</h4>
                         <div className="flex flex-wrap gap-2">
                             {scorers.map((s, idx) => { const p = players.find(ply => ply.id === s.playerId); return <span key={`g-${idx}`} className="bg-slate-900 border border-emerald-900/50 px-2 py-1 rounded text-xs font-bold flex items-center gap-1 text-emerald-400"><Goal className="w-3 h-3" /> {p?.name} (x{s.count})</span> })}
-                            {foulers.map((s, idx) => { const p = players.find(ply => ply.id === s.playerId); return <span key={`f-${idx}`} className="bg-slate-900 border border-orange-900/50 px-2 py-1 rounded text-xs font-bold flex items-center gap-1 text-orange-400"><Square className="w-3 h-3 fill-current" /> {p?.name} (x{s.count})</span> })}
+                            {cards.map((s, idx) => { const p = players.find(ply => ply.id === s.playerId); return <span key={`c-${idx}`} className={`bg-slate-900 border px-2 py-1 rounded text-xs font-bold flex items-center gap-1 ${s.type === 'yellow' ? 'border-yellow-900/50 text-yellow-400' : 'border-red-900/50 text-red-400'}`}><Square className="w-3 h-3 fill-current" /> {p?.name} {s.count > 1 ? `(x${s.count})` : ''}</span> })}
                         </div>
                     </div>
                     <button onClick={handleSaveResult} className="w-full py-4 bg-gradient-to-r from-rose-600 to-red-600 text-white font-bold rounded-xl shadow-lg hover:from-rose-500 hover:to-red-500 transition disabled:opacity-50 disabled:cursor-not-allowed border border-rose-500/50" disabled={isNewMatchMode && (!entryHomeId || !entryAwayId)}>{isNewMatchMode ? "Registrar Partido Nuevo" : "Guardar Resultado"}</button>

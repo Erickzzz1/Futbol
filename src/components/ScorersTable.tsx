@@ -8,7 +8,9 @@ interface Props {
 export const ScorersTable: React.FC<Props> = ({ scorers }) => {
     return (
         <div className="bg-[#D9D0C1] p-2 rounded-lg shadow-md">
-            <h3 className="text-center font-bold text-gray-800 uppercase mb-2">Tabla de Goleo</h3>
+            <div className="flex justify-between items-center mb-2">
+                <h3 className="text-center font-bold text-gray-800 uppercase">Tabla de Goleo</h3>
+            </div>
             <table className="w-full text-sm">
                 <thead className="bg-[#BFAEA0] text-white">
                     <tr>

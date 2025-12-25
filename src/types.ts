@@ -27,9 +27,11 @@ export interface Player {
     team_name?: string;
     number: number;
     goals?: number;
-    fouls?: number;
+    yellow_cards?: number;
+    red_cards?: number;
     custom_goals?: number;
-    custom_fouls?: number;
+    custom_yellow?: number;
+    custom_red?: number;
 }
 
 export interface Match {

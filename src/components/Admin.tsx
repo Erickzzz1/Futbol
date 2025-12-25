@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api';
 import { Team, Match, Player, Standing } from '../types';
-import { Calendar, BarChart3, Users, Trophy, Save } from 'lucide-react';
+import { Calendar, BarChart3, Users, Trophy, AlertTriangle, DollarSign, Settings, Download } from 'lucide-react';
 import Logo from '../assets/Icono.png';
 import { toast } from 'sonner';
 
@@ -10,13 +10,17 @@ import { AdminSchedule } from './admin/AdminSchedule';
 import { AdminResults } from './admin/AdminResults';
 import { AdminTeams } from './admin/AdminTeams';
 import { AdminPlayoffs } from './admin/AdminPlayoffs';
+import { AdminSanctions } from './admin/AdminSanctions';
+import { AdminTreasury } from './admin/AdminTreasury';
+import { AdminSettings } from './admin/AdminSettings';
+// import { exportTournamentData } from '../utils/ExportService';
 
 interface AdminProps {
     tournamentId: number;
 }
 
 export const Admin: React.FC<AdminProps> = ({ tournamentId }) => {
-    const [tab, setTab] = useState<'schedule' | 'results' | 'teams' | 'playoffs'>('schedule');
+    const [tab, setTab] = useState<'schedule' | 'results' | 'teams' | 'playoffs' | 'sanctions' | 'treasury' | 'settings'>('schedule');
     const [teams, setTeams] = useState<Team[]>([]);
     const [players, setPlayers] = useState<Player[]>([]);
     const [matches, setMatches] = useState<Match[]>([]);
@@ -40,6 +44,8 @@ export const Admin: React.FC<AdminProps> = ({ tournamentId }) => {
         setStandings(s);
     };
 
+    /* Export logic removed */
+
 
 
     return (
@@ -50,6 +56,7 @@ export const Admin: React.FC<AdminProps> = ({ tournamentId }) => {
                     <p className="text-amber-400 font-bold text-2xl uppercase tracking-[0.2em] mt-1">Panel de Administración</p>
                 </div>
                 <div className="flex items-center gap-4">
+                    {/* Export button removed */}
                     <div className="bg-gradient-to-br from-amber-400 to-yellow-600 rounded-full p-1 w-24 h-24 shadow-lg shadow-amber-500/20">
                         <div className="w-full h-full bg-slate-900 rounded-full flex items-center justify-center border-4 border-slate-900 overflow-hidden">
                             <img src={Logo} alt="Logo" className="w-full h-full object-cover" />
@@ -84,6 +91,24 @@ export const Admin: React.FC<AdminProps> = ({ tournamentId }) => {
                         className={`px-8 py-3 rounded-full font-bold text-lg transition-all shadow-lg flex items-center gap-2 ${tab === 'playoffs' ? 'bg-amber-500 text-black shadow-amber-500/30' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
                     >
                         <Trophy className="w-5 h-5" /> Liguilla
+                    </button>
+                    <button
+                        onClick={() => setTab('sanctions')}
+                        className={`px-8 py-3 rounded-full font-bold text-lg transition-all shadow-lg flex items-center gap-2 ${tab === 'sanctions' ? 'bg-amber-500 text-black shadow-amber-500/30' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                    >
+                        <AlertTriangle className="w-5 h-5" /> Sanciones
+                    </button>
+                    <button
+                        onClick={() => setTab('treasury')}
+                        className={`px-8 py-3 rounded-full font-bold text-lg transition-all shadow-lg flex items-center gap-2 ${tab === 'treasury' ? 'bg-amber-500 text-black shadow-amber-500/30' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                    >
+                        <DollarSign className="w-5 h-5" /> Tesorería
+                    </button>
+                    <button
+                        onClick={() => setTab('settings')}
+                        className={`px-8 py-3 rounded-full font-bold text-lg transition-all shadow-lg flex items-center gap-2 ${tab === 'settings' ? 'bg-indigo-500 text-white shadow-indigo-500/30' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                    >
+                        <Settings className="w-5 h-5" /> Reglas
                     </button>
                 </div>
 
@@ -121,7 +146,18 @@ export const Admin: React.FC<AdminProps> = ({ tournamentId }) => {
                             tournamentId={tournamentId}
                             onUpdate={loadData}
                         />
+                    )}
 
+                    {tab === 'sanctions' && (
+                        <AdminSanctions tournamentId={tournamentId} />
+                    )}
+
+                    {tab === 'treasury' && (
+                        <AdminTreasury tournamentId={tournamentId} />
+                    )}
+
+                    {tab === 'settings' && (
+                        <AdminSettings tournamentId={tournamentId} />
                     )}
                 </div>
             </div>

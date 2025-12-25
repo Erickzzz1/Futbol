@@ -4,6 +4,7 @@ import { Admin } from './components/Admin'
 import { TournamentList } from './components/TournamentList'
 import { Tournament } from './types'
 import { ArrowLeft, Settings, BarChart3 } from 'lucide-react';
+import { CaptureButton } from './components/CaptureButton';
 
 function App(): JSX.Element {
     const [view, setView] = useState('dashboard');
@@ -33,6 +34,13 @@ function App(): JSX.Element {
 
                 <div className="flex items-center gap-4">
                     <div className="h-6 w-px bg-slate-800 hidden sm:block"></div>
+                    {view === 'dashboard' && (
+                        <CaptureButton
+                            targetId="dashboard-content"
+                            fileName="Resultados"
+                            className="bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700"
+                        />
+                    )}
                     <button
                         className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wide transition-all shadow-lg flex items-center gap-2 ${view === 'admin'
                             ? 'bg-gradient-to-r from-amber-600 to-amber-500 text-black hover:from-amber-500 hover:to-amber-400 shadow-amber-900/20'
