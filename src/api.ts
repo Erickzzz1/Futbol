@@ -29,10 +29,12 @@ export const api = {
     addPaymentObligation: (data: { tournamentId: number, teamId: number, concept: string, amount: number }) => window.electron.ipcRenderer.invoke('add-payment-obligation', data),
     updatePaymentStatus: (id: number, status: 'pending' | 'paid') => window.electron.ipcRenderer.invoke('update-payment-status', { id, status }),
     deletePayment: (id: number) => window.electron.ipcRenderer.invoke('delete-payment', id),
+    generateBulkPayments: (data: { tournamentId: number, type: 'inscription' | 'matchday', amount: number, matchday?: number }) => window.electron.ipcRenderer.invoke('generate-bulk-payments', data),
 
     // Settings
     getSettings: (tournamentId: number): Promise<Record<string, string>> => window.electron.ipcRenderer.invoke('get-settings', tournamentId),
     updateSetting: (tournamentId: number, key: string, value: string | number) => window.electron.ipcRenderer.invoke('update-setting', { tournamentId, key, value }),
+    searchGlobal: (tournamentId: number, query: string) => window.electron.ipcRenderer.invoke('search-global', tournamentId, query),
 
     // Updated filters
     getMatches: (tournamentId: number, matchday?: number, stage?: string): Promise<Match[]> => window.electron.ipcRenderer.invoke('get-matches', { tournamentId, matchday, stage }),

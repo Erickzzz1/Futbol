@@ -504,6 +504,47 @@ export function setupIPC() {
         });
     });
 
+    ipcMain.handle('search-global', (_, tournamentId, query) => {
+        const term = `%${query}%`;
+
+        const teams = db.prepare(`
+            SELECT * FROM teams 
+            WHERE tournament_id = ? AND name LIKE ? 
+            LIMIT 5
+        `).all(tournamentId, term);
+
+        const players = db.prepare(`
+            SELECT p.*, t.name as team_name 
+            FROM players p
+            JOIN teams t ON p.team_id = t.id
+            WHERE t.tournament_id = ? AND p.name LIKE ?
+            LIMIT 5
+        `).all(tournamentId, term);
+
+        const matches = db.prepare(`
+            SELECT m.*, 
+                   t1.name as home_team, 
+                   t2.name as away_team 
+            FROM matches m
+            JOIN teams t1 ON m.home_team_id = t1.id
+            JOIN teams t2 ON m.away_team_id = t2.id
+            WHERE t1.tournament_id = ? AND (t1.name LIKE ? OR t2.name LIKE ?)
+            ORDER BY m.date DESC
+            LIMIT 5
+        `).all(tournamentId, term, term);
+
+        // Normalize matches for frontend if needed, but since we select t1.name as home_team etc, it matches the expected struct mostly.
+        // Wait, standard getMatches returns home_team as string name.
+        // The original query was: SELECT * FROM matches ... which returns home_team_id. 
+        // The frontend expects home_team (string name).
+        // My previous wrong query assumed matches had home_team string column or similar.
+        // Actually, getMatches IPC usually joins.
+        // Let's make sure the return shape matches what GlobalSearch expects. GlobalSearch uses m.home_team which is text.
+        // So this query is correct: selecting t1.name as home_team.
+
+        return { teams, players, matches };
+    });
+
     ipcMain.handle('get-settings', (_, tournamentId) => {
         if (!tournamentId) return {};
         const rows = db.prepare('SELECT key, value FROM settings WHERE tournament_id = ?').all(tournamentId) as { key: string, value: string }[];
@@ -592,6 +633,48 @@ export function setupIPC() {
         return true;
     });
 
+    ipcMain.handle('generate-bulk-payments', (_, { tournamentId, type, amount, matchday }) => {
+        if (!tournamentId) return false;
+        const amountVal = Number(amount);
+        if (isNaN(amountVal) || amountVal <= 0) return false;
+
+        const transaction = db.transaction(() => {
+            if (type === 'inscription') {
+                const teams = db.prepare("SELECT id FROM teams WHERE tournament_id = ?").all(tournamentId) as { id: number }[];
+                const insert = db.prepare("INSERT INTO payments (tournament_id, team_id, concept, amount, status) VALUES (?, ?, 'Inscripción', ?, 'pending')");
+                for (const t of teams) {
+                    const exists = db.prepare("SELECT id FROM payments WHERE tournament_id = ? AND team_id = ? AND concept = 'Inscripción'").get(tournamentId, t.id);
+                    if (!exists) insert.run(tournamentId, t.id, amountVal);
+                }
+            } else if (type === 'matchday' && matchday) {
+                // Get all matches for the matchday involving teams from this tournament
+                const matchesAll = db.prepare(`
+                    SELECT home_team_id, away_team_id FROM matches 
+                    WHERE matchday = ? AND (home_team_id IN (SELECT id FROM teams WHERE tournament_id = ?) OR away_team_id IN (SELECT id FROM teams WHERE tournament_id = ?))
+                `).all(matchday, tournamentId, tournamentId) as { home_team_id: number, away_team_id: number }[];
+
+                const insert = db.prepare("INSERT INTO payments (tournament_id, team_id, concept, amount, status) VALUES (?, ?, ?, ?, 'pending')");
+                const concept = `Arbitraje J${matchday}`;
+
+                for (const m of matchesAll) {
+                    const existsHome = db.prepare("SELECT id FROM payments WHERE tournament_id = ? AND team_id = ? AND concept = ?").get(tournamentId, m.home_team_id, concept);
+                    if (!existsHome) insert.run(tournamentId, m.home_team_id, concept, amountVal);
+
+                    const existsAway = db.prepare("SELECT id FROM payments WHERE tournament_id = ? AND team_id = ? AND concept = ?").get(tournamentId, m.away_team_id, concept);
+                    if (!existsAway) insert.run(tournamentId, m.away_team_id, concept, amountVal);
+                }
+            }
+        });
+
+        try {
+            transaction();
+            return true;
+        } catch (e) {
+            console.error("Bulk payments failed", e);
+            return false;
+        }
+    });
+
     ipcMain.handle('reset-tournament', (_, tournamentId) => {
         if (!tournamentId) return false;
 
@@ -611,6 +694,9 @@ export function setupIPC() {
                 db.prepare(`DELETE FROM cards WHERE match_id IN (${matchIds})`).run();
                 db.prepare(`DELETE FROM matches WHERE id IN (${matchIds})`).run();
             }
+
+            // Delete all payments for teams in this tournament
+            db.prepare(`DELETE FROM payments WHERE team_id IN (${teamIds})`).run();
 
             // Reset players custom stats
             db.prepare(`UPDATE players SET custom_goals = 0, custom_yellow = 0, custom_red = 0 WHERE team_id IN (${teamIds})`).run();

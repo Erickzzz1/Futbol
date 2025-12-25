@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../api';
 import { Team } from '../../types';
-import { DollarSign, PlusCircle, CheckCircle, XCircle, Trash2 } from 'lucide-react';
+import { DollarSign, PlusCircle, CheckCircle, XCircle, Trash2, Zap } from 'lucide-react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 interface TreasurySummary {
     id: number;
@@ -29,27 +30,95 @@ export const AdminTreasury: React.FC<AdminTreasuryProps> = ({ tournamentId }) =>
     const [summary, setSummary] = useState<TreasurySummary[]>([]);
     const [selectedTeam, setSelectedTeam] = useState<TreasurySummary | null>(null);
     const [teams, setTeams] = useState<Team[]>([]);
+    const [settings, setSettings] = useState({ cost_inscription: "0", cost_arbitration: "0" });
 
     // Form State
     const [formTeamId, setFormTeamId] = useState<number>(0);
     const [concept, setConcept] = useState('');
     const [amount, setAmount] = useState(0);
 
+    // Bulk State
+    const [bulkMatchday, setBulkMatchday] = useState(1);
+
     useEffect(() => {
         loadData();
     }, [tournamentId]);
 
     const loadData = async () => {
-        const s = await api.getTreasurySummary(tournamentId);
+        const [s, t, config] = await Promise.all([
+            api.getTreasurySummary(tournamentId),
+            api.getTeams(tournamentId),
+            api.getSettings(tournamentId)
+        ]);
         setSummary(s);
-        const t = await api.getTeams(tournamentId);
         setTeams(t);
+        setSettings({
+            cost_inscription: config.cost_inscription || "0",
+            cost_arbitration: config.cost_arbitration || "0"
+        });
 
         // Refresh selected team if open
         if (selectedTeam) {
             const updated = s.find((x: any) => x.id === selectedTeam.id);
             if (updated) setSelectedTeam(updated);
         }
+    };
+
+    // Confirm Dialog State
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const [confirmConfig, setConfirmConfig] = useState<{
+        title: string;
+        message: string;
+        action: () => void;
+        isDestructive?: boolean;
+    }>({ title: '', message: '', action: () => { } });
+
+    const openConfirm = (title: string, message: string, action: () => void, isDestructive = false) => {
+        setConfirmConfig({ title, message, action, isDestructive });
+        setConfirmOpen(true);
+    };
+
+    const handleConfirm = () => {
+        confirmConfig.action();
+        setConfirmOpen(false);
+    };
+
+    const handleBulkInscription = async () => {
+        const cost = Number(settings.cost_inscription);
+        if (cost <= 0) return toast.error("Configura el costo de inscripción en Reglas primero.");
+
+        openConfirm(
+            "Generación Masiva",
+            `¿Estás seguro de generar el cobro de inscripción ($${cost}) a TODOS los equipos? Esto no duplicará cobros existentes.`,
+            async () => {
+                const success = await api.generateBulkPayments({ tournamentId, type: 'inscription', amount: cost });
+                if (success) {
+                    toast.success("Cobros de inscripción generados");
+                    loadData();
+                } else {
+                    toast.error("Error al generar cobros");
+                }
+            }
+        );
+    };
+
+    const handleBulkArbitration = async () => {
+        const cost = Number(settings.cost_arbitration);
+        if (cost <= 0) return toast.error("Configura el costo de arbitraje en Reglas primero.");
+
+        openConfirm(
+            "Generación Masiva",
+            `¿Generar cobro de arbitraje ($${cost}) para la Jornada ${bulkMatchday}? Se aplicará a los equipos que tengan partido programado.`,
+            async () => {
+                const success = await api.generateBulkPayments({ tournamentId, type: 'matchday', amount: cost, matchday: bulkMatchday });
+                if (success) {
+                    toast.success("Cobros de arbitraje generados.");
+                    loadData();
+                } else {
+                    toast.error("Error al generar cobros");
+                }
+            }
+        );
     };
 
     const handleAddPayment = async () => {
@@ -63,20 +132,35 @@ export const AdminTreasury: React.FC<AdminTreasuryProps> = ({ tournamentId }) =>
 
     const toggleStatus = async (payment: Payment) => {
         const newStatus = payment.status === 'pending' ? 'paid' : 'pending';
+        // Toggle is usually safe/quick, maybe confirm only for un-paying? Nah, toggle is fine.
         await api.updatePaymentStatus(payment.id, newStatus);
         toast.success(`Marcado como ${newStatus === 'paid' ? 'PAGADO' : 'PENDIENTE'}`);
         loadData();
     };
 
     const handleDelete = async (id: number) => {
-        if (!confirm("¿Eliminar este cargo?")) return;
-        await api.deletePayment(id);
-        toast.success("Cargo eliminado");
-        loadData();
+        openConfirm(
+            "Eliminar Cargo",
+            "¿Estás seguro de eliminar este registro financiero? Esta acción no se puede deshacer.",
+            async () => {
+                await api.deletePayment(id);
+                toast.success("Cargo eliminado");
+                loadData();
+            },
+            true
+        );
     };
 
     return (
         <div className="p-8 animate-in fade-in zoom-in-95 duration-300">
+            <ConfirmDialog
+                isOpen={confirmOpen}
+                title={confirmConfig.title}
+                message={confirmConfig.message}
+                onConfirm={handleConfirm}
+                onCancel={() => setConfirmOpen(false)}
+                isDestructive={confirmConfig.isDestructive}
+            />
             <h2 className="text-2xl font-bold text-white flex items-center gap-3 mb-6">
                 <span className="text-amber-500"><DollarSign className="w-8 h-8" /></span> Control Económico
             </h2>
@@ -103,6 +187,42 @@ export const AdminTreasury: React.FC<AdminTreasuryProps> = ({ tournamentId }) =>
 
                 {/* Right: Details & Actions */}
                 <div className="lg:col-span-2 space-y-6">
+                    {/* Bulk Actions */}
+                    <div className="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700">
+                        <h3 className="text-sm font-bold text-emerald-400 uppercase mb-4 flex items-center gap-2"><Zap className="w-4 h-4" /> Generación Masiva</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-slate-900/50 p-4 rounded border border-emerald-500/20">
+                                <h4 className="font-bold text-white text-sm mb-1">Inscripción</h4>
+                                <p className="text-xs text-slate-400 mb-3">Costo actual: ${settings.cost_inscription}</p>
+                                <button
+                                    onClick={handleBulkInscription}
+                                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2 rounded transition"
+                                >
+                                    Generar a Todos
+                                </button>
+                            </div>
+                            <div className="bg-slate-900/50 p-4 rounded border border-blue-500/20">
+                                <h4 className="font-bold text-white text-sm mb-1">Arbitraje por Jornada</h4>
+                                <p className="text-xs text-slate-400 mb-3">Costo actual: ${settings.cost_arbitration}</p>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        value={bulkMatchday}
+                                        onChange={(e) => setBulkMatchday(Number(e.target.value))}
+                                        className="w-16 bg-slate-800 border border-slate-600 rounded text-center text-sm text-white"
+                                    />
+                                    <button
+                                        onClick={handleBulkArbitration}
+                                        className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 rounded transition"
+                                    >
+                                        Generar Jornada
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Add Charge Form */}
                     <div className="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700">
                         <h3 className="text-sm font-bold text-slate-400 uppercase mb-4 flex items-center gap-2"><PlusCircle className="w-4 h-4" /> Agregar Cargo</h3>

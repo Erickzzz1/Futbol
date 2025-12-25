@@ -3,6 +3,7 @@ import { api } from '../../api';
 import { Team, Match } from '../../types';
 import { Calendar, Zap, AlertTriangle, ArrowLeftRight, Check } from 'lucide-react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 interface AdminScheduleProps {
     tournamentId: number;
@@ -28,30 +29,74 @@ export const AdminSchedule: React.FC<AdminScheduleProps> = ({ tournamentId, matc
     const [swapSourceId, setSwapSourceId] = useState<number | null>(null);
     const [scheduleFilterMatchday, setScheduleFilterMatchday] = useState<number>(0); // 0 = All
 
+    // Confirm Dialog State
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const [confirmConfig, setConfirmConfig] = useState<{
+        title: string;
+        message: string;
+        action: () => void;
+        isDestructive?: boolean;
+    }>({ title: '', message: '', action: () => { } });
+
+    const openConfirm = (title: string, message: string, action: () => void, isDestructive = false) => {
+        setConfirmConfig({ title, message, action, isDestructive });
+        setConfirmOpen(true);
+    };
+
+    const handleConfirm = () => {
+        confirmConfig.action();
+        setConfirmOpen(false);
+    };
+
     const handleGenerateFixture = async () => {
         if (matches.filter(m => m.stage === 'regular').length > 0) {
-            if (!confirm("ADVERTENCIA: Ya existen partidos regulares creados. ¿Generar calendario igual? (Podrían duplicarse)")) {
-                return;
-            }
+            openConfirm(
+                "Advertencia",
+                "Ya existen partidos regulares creados. ¿Generar calendario igual? (Podrían duplicarse)",
+                async () => {
+                    await api.generateFixture(tournamentId, {
+                        startDate: autoStartDate,
+                        startTime: autoStartTime,
+                        matchDuration: autoMatchDuration,
+                        matchInterval: autoMatchInterval
+                    });
+                    toast.success('Calendario Generado Exitosamente');
+                    onUpdate();
+                }
+            );
+        } else {
+            await api.generateFixture(tournamentId, {
+                startDate: autoStartDate,
+                startTime: autoStartTime,
+                matchDuration: autoMatchDuration,
+                matchInterval: autoMatchInterval
+            });
+            toast.success('Calendario Generado Exitosamente');
+            onUpdate();
         }
-        await api.generateFixture(tournamentId, {
-            startDate: autoStartDate,
-            startTime: autoStartTime,
-            matchDuration: autoMatchDuration,
-            matchInterval: autoMatchInterval
-        });
-        toast.success('Calendario Generado Exitosamente');
-        onUpdate();
     };
 
     const handleResetTournament = async () => {
-        if (confirm("¿ESTÁS SEGURO? Esto borrará TODOS los partidos, resultados y reiniciará las estadísticas de los jugadores. Los equipos y jugadores se mantendrán.")) {
-            if (confirm("Confirmación final: ¿Realmente deseas borrar todo el torneo?")) {
-                await api.resetTournament(tournamentId);
-                toast.success("Torneo reiniciado correctamente.");
-                onUpdate();
-            }
-        }
+        openConfirm(
+            "⚠️ Borrar Torneo",
+            "¿ESTÁS SEGURO? Esto borrará TODOS los partidos, resultados, pagos y reiniciará las estadísticas de los jugadores. Los equipos y jugadores se mantendrán. Esta acción es IRREVERSIBLE.",
+            () => {
+                setConfirmOpen(false); // Close first dialog
+                setTimeout(() => {
+                    openConfirm(
+                        "Confirmación Final",
+                        "Última advertencia: ¿Realmente deseas borrar todo el torneo?",
+                        async () => {
+                            await api.resetTournament(tournamentId);
+                            toast.success("Torneo reiniciado correctamente.");
+                            onUpdate();
+                        },
+                        true
+                    );
+                }, 100); // Small delay to ensure first dialog closes
+            },
+            true
+        );
     };
 
     const handleSchedule = async () => {
@@ -84,24 +129,33 @@ export const AdminSchedule: React.FC<AdminScheduleProps> = ({ tournamentId, matc
             return; // Cancel
         }
 
-        if (!confirm("¿Intercambiar horario entre estos dos partidos?")) {
-            setSwapSourceId(null);
-            return;
-        }
-
-        try {
-            await api.swapMatches(swapSourceId, targetId);
-            toast.success('Horarios intercambiados');
-            setSwapSourceId(null);
-            onUpdate();
-        } catch (e) {
-            console.error(e);
-            toast.error('Error al intercambiar');
-        }
+        openConfirm(
+            "Intercambiar Horarios",
+            "¿Estás seguro de intercambiar el horario entre estos dos partidos?",
+            async () => {
+                try {
+                    await api.swapMatches(swapSourceId, targetId);
+                    toast.success('Horarios intercambiados');
+                    setSwapSourceId(null);
+                    onUpdate();
+                } catch (e) {
+                    console.error(e);
+                    toast.error('Error al intercambiar');
+                }
+            }
+        );
     };
 
     return (
         <div className="p-8 animate-in fade-in zoom-in-95 duration-300">
+            <ConfirmDialog
+                isOpen={confirmOpen}
+                title={confirmConfig.title}
+                message={confirmConfig.message}
+                onConfirm={handleConfirm}
+                onCancel={() => setConfirmOpen(false)}
+                isDestructive={confirmConfig.isDestructive}
+            />
             <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
                 <span className="text-amber-500"><Calendar className="w-8 h-8" /></span> Generador de Calendario
             </h2>

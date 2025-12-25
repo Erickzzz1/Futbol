@@ -1,103 +1,142 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../api';
-import { Settings, Save } from 'lucide-react';
+import { Save, AlertTriangle, Shield, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
 
-interface AdminSettingsProps {
+interface Props {
     tournamentId: number;
 }
 
-export const AdminSettings: React.FC<AdminSettingsProps> = ({ tournamentId }) => {
-    const [settings, setSettings] = useState<any>({});
-    const [loading, setLoading] = useState(true);
+export const AdminSettings: React.FC<Props> = ({ tournamentId }) => {
+    const [settings, setSettings] = useState({
+        points_win: "3",
+        points_draw: "1",
+        points_loss: "0",
+        cost_inscription: "0",
+        cost_arbitration: "0"
+    });
+    const [loading, setLoading] = useState(false);
 
     useEffect(() => {
         loadSettings();
     }, [tournamentId]);
 
     const loadSettings = async () => {
-        setLoading(true);
-        const data = await api.getSettings(tournamentId);
-        setSettings(data);
-        setLoading(false);
+        try {
+            const data = await api.getSettings(tournamentId);
+            setSettings(prev => ({ ...prev, ...data }));
+        } catch (e) {
+            toast.error("Error al cargar reglas");
+        }
     };
 
-    const handleChange = (key: string, value: string) => {
-        setSettings({ ...settings, [key]: value });
+    const handleChange = (key: string, val: string) => {
+        setSettings(prev => ({ ...prev, [key]: val }));
     };
 
     const handleSave = async () => {
+        setLoading(true);
         try {
-            await api.updateSetting(tournamentId, 'points_win', settings.points_win);
-            await api.updateSetting(tournamentId, 'points_draw', settings.points_draw);
-            await api.updateSetting(tournamentId, 'points_loss', settings.points_loss);
-            toast.success("Configuración guardada correctamente");
+            await Promise.all([
+                api.updateSetting(tournamentId, 'points_win', settings.points_win),
+                api.updateSetting(tournamentId, 'points_draw', settings.points_draw),
+                api.updateSetting(tournamentId, 'points_loss', settings.points_loss),
+                api.updateSetting(tournamentId, 'cost_inscription', settings.cost_inscription),
+                api.updateSetting(tournamentId, 'cost_arbitration', settings.cost_arbitration)
+            ]);
+            toast.success("Configuración guardada");
         } catch (e) {
-            toast.error("Error al guardar configuración");
+            toast.error("Error al guardar");
+        } finally {
+            setLoading(false);
         }
     };
 
     return (
-        <div className="p-8 animate-in fade-in zoom-in-95 duration-300">
-            <h2 className="text-2xl font-bold text-white flex items-center gap-3 mb-6">
-                <span className="text-indigo-400"><Settings className="w-8 h-8" /></span> Configuración del Torneo
-            </h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700">
-                    <h3 className="text-lg font-bold text-slate-200 mb-6 border-b border-slate-700 pb-2">Sistema de Puntuación</h3>
-
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-slate-400 text-sm font-bold mb-2">Puntos por Victoria</label>
-                            <input
-                                type="number"
-                                className="w-full bg-slate-700 border border-slate-600 rounded p-3 text-white font-bold text-lg focus:border-indigo-500 transition"
-                                value={settings.points_win || ''}
-                                onChange={e => handleChange('points_win', e.target.value)}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-slate-400 text-sm font-bold mb-2">Puntos por Empate</label>
-                            <input
-                                type="number"
-                                className="w-full bg-slate-700 border border-slate-600 rounded p-3 text-white font-bold text-lg focus:border-indigo-500 transition"
-                                value={settings.points_draw || ''}
-                                onChange={e => handleChange('points_draw', e.target.value)}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-slate-400 text-sm font-bold mb-2">Puntos por Derrota</label>
-                            <input
-                                type="number"
-                                className="w-full bg-slate-700 border border-slate-600 rounded p-3 text-white font-bold text-lg focus:border-indigo-500 transition"
-                                value={settings.points_loss || ''}
-                                onChange={e => handleChange('points_loss', e.target.value)}
-                            />
-                        </div>
-                    </div>
-
-                    <div className="mt-8 pt-6 border-t border-slate-700">
-                        <button
-                            onClick={handleSave}
-                            className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg shadow-lg transition flex justify-center items-center gap-2"
-                        >
-                            <Save className="w-5 h-5" /> Guardar Cambios
-                        </button>
-                        <p className="text-xs text-slate-500 mt-3 text-center">
-                            Los cambios afectarán inmediatamente a la tabla general.
-                        </p>
-                    </div>
+        <div className="space-y-8 max-w-4xl mx-auto p-4 md:p-8">
+            <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 shadow-xl">
+                <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-700">
+                    <Shield className="w-6 h-6 text-amber-500" />
+                    <h2 className="text-xl font-bold text-white uppercase tracking-wide">Reglas de Puntuación</h2>
                 </div>
 
-                <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700/50 dashed">
-                    <h3 className="text-lg font-bold text-slate-500 mb-4">Próximamente</h3>
-                    <ul className="list-disc list-inside text-slate-500 space-y-2 text-sm">
-                        <li>Criterios de desempate personalizados</li>
-                        <li>Duración de partidos</li>
-                        <li>Límite de cambios</li>
-                        <li>Costo de inscripción por defecto</li>
-                    </ul>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
+                        <label className="block text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">Puntos por Victoria</label>
+                        <input
+                            type="number"
+                            value={settings.points_win}
+                            onChange={(e) => handleChange('points_win', e.target.value)}
+                            className="w-full bg-slate-800 border border-slate-600 text-white rounded p-2 focus:ring-2 focus:ring-emerald-500 outline-none font-mono text-lg text-center"
+                        />
+                    </div>
+                    <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Puntos por Empate</label>
+                        <input
+                            type="number"
+                            value={settings.points_draw}
+                            onChange={(e) => handleChange('points_draw', e.target.value)}
+                            className="w-full bg-slate-800 border border-slate-600 text-white rounded p-2 focus:ring-2 focus:ring-slate-500 outline-none font-mono text-lg text-center"
+                        />
+                    </div>
+                    <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
+                        <label className="block text-xs font-bold text-red-400 uppercase tracking-wider mb-2">Puntos por Derrota</label>
+                        <input
+                            type="number"
+                            value={settings.points_loss}
+                            onChange={(e) => handleChange('points_loss', e.target.value)}
+                            className="w-full bg-slate-800 border border-slate-600 text-white rounded p-2 focus:ring-2 focus:ring-red-500 outline-none font-mono text-lg text-center"
+                        />
+                    </div>
+                </div>
+            </div>
+
+            <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 shadow-xl">
+                <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-700">
+                    <DollarSign className="w-6 h-6 text-emerald-500" />
+                    <h2 className="text-xl font-bold text-white uppercase tracking-wide">Costos Automáticos</h2>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
+                        <label className="block text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">Costo Inscripción ($)</label>
+                        <input
+                            type="number"
+                            value={settings.cost_inscription}
+                            onChange={(e) => handleChange('cost_inscription', e.target.value)}
+                            className="w-full bg-slate-800 border border-slate-600 text-white rounded p-2 focus:ring-2 focus:ring-emerald-500 outline-none font-mono text-lg text-center"
+                        />
+                        <p className="text-[10px] text-slate-500 mt-2">Costo base que se cobrará a todos los equipos.</p>
+                    </div>
+                    <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
+                        <label className="block text-xs font-bold text-blue-400 uppercase tracking-wider mb-2">Costo Arbitraje ($)</label>
+                        <input
+                            type="number"
+                            value={settings.cost_arbitration}
+                            onChange={(e) => handleChange('cost_arbitration', e.target.value)}
+                            className="w-full bg-slate-800 border border-slate-600 text-white rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-lg text-center"
+                        />
+                        <p className="text-[10px] text-slate-500 mt-2">Se cobrará por partido jugado (Jornada).</p>
+                    </div>
+                </div>
+            </div>
+
+            <div className="flex justify-end">
+                <button
+                    onClick={handleSave}
+                    disabled={loading}
+                    className="flex items-center gap-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-black font-bold py-3 px-8 rounded-lg shadow-lg hover:shadow-amber-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-wide"
+                >
+                    <Save className="w-5 h-5" />
+                    {loading ? 'Guardando...' : 'Guardar Cambios'}
+                </button>
+            </div>
+
+            <div className="flex gap-4 p-4 bg-yellow-900/20 border border-yellow-700/50 rounded-lg items-start">
+                <AlertTriangle className="w-5 h-5 text-yellow-500 shrink-0 mt-0.5" />
+                <div>
+                    <h4 className="font-bold text-yellow-500 text-sm uppercase">Atención</h4>
+                    <p className="text-xs text-yellow-200/80 mt-1">Los cambios en los puntos afectarán inmediatamente a la Tabla General recalculando todos los partidos jugados. Los cambios en costos se aplicarán únicamente a las nuevas generaciones de cobros.</p>
                 </div>
             </div>
         </div>

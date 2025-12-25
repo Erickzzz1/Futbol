@@ -4,6 +4,7 @@ import { Admin } from './components/Admin'
 import { TournamentList } from './components/TournamentList'
 import { Tournament } from './types'
 import { ArrowLeft, Settings, BarChart3 } from 'lucide-react';
+import { GlobalSearch } from './components/GlobalSearch';
 import { CaptureButton } from './components/CaptureButton';
 
 function App(): JSX.Element {
@@ -31,6 +32,8 @@ function App(): JSX.Element {
                         <span className="text-[10px] font-bold text-slate-500 uppercase">{currentTournament.type} • {currentTournament.category}</span>
                     </div>
                 </div>
+
+                {view === 'admin' && <GlobalSearch tournamentId={currentTournament.id} />}
 
                 <div className="flex items-center gap-4">
                     <div className="h-6 w-px bg-slate-800 hidden sm:block"></div>

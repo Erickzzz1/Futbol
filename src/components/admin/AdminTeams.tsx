@@ -3,6 +3,7 @@ import { Team, Player, Standing } from '../../types';
 import { Users, Bot, UserCheck } from 'lucide-react';
 import { api } from '../../api';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 interface AdminTeamsProps {
     tournamentId: number;
@@ -24,7 +25,25 @@ export const AdminTeams: React.FC<AdminTeamsProps> = ({ tournamentId, teams, pla
     const [editPlayerName, setEditPlayerName] = useState('');
     const [editPlayerNumber, setEditPlayerNumber] = useState(0);
     const [editPlayerCustomGoals, setEditPlayerCustomGoals] = useState(0);
-    const [editPlayerCustomFouls, setEditPlayerCustomFouls] = useState(0);
+
+    // Confirm Dialog State
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const [confirmConfig, setConfirmConfig] = useState<{
+        title: string;
+        message: string;
+        action: () => void;
+        isDestructive?: boolean;
+    }>({ title: '', message: '', action: () => { } });
+
+    const openConfirm = (title: string, message: string, action: () => void, isDestructive = false) => {
+        setConfirmConfig({ title, message, action, isDestructive });
+        setConfirmOpen(true);
+    };
+
+    const handleConfirm = () => {
+        confirmConfig.action();
+        setConfirmOpen(false);
+    };
 
     const handleAddTeam = async () => {
         if (!newTeamName) return;
@@ -43,24 +62,33 @@ export const AdminTeams: React.FC<AdminTeamsProps> = ({ tournamentId, teams, pla
 
     const handleDeleteTeam = async () => {
         if (!selectedTeam) return;
-        if (confirm(`¿ELIMINAR EQUIPO "${selectedTeam.name}"? Esto borrará también a sus jugadores.`)) {
-            await api.deleteTeam(selectedTeam.id);
-            setSelectedTeam(null);
-            onUpdate();
-        }
+        openConfirm(
+            "Eliminar Equipo",
+            `¿Estás seguro de eliminar "${selectedTeam.name}"? Esto también borrará a todos sus jugadores.`,
+            async () => {
+                await api.deleteTeam(selectedTeam.id);
+                setSelectedTeam(null);
+                onUpdate();
+            },
+            true
+        );
     };
 
     const handleSeedPlayers = async () => {
         if (!tournamentId) return;
-        if (confirm('¿Estás seguro? Esto generará jugadores aleatorios para los equipos que tengan menos de 8 jugadores.')) {
-            const success = await api.seedPlayers(tournamentId);
-            if (success) {
-                toast.success('Jugadores generados correctamente');
-                onUpdate();
-            } else {
-                toast.error('No se pudieron generar jugadores. Asegúrate de tener equipos registrados en este torneo.');
+        openConfirm(
+            "Generar Jugadores",
+            "¿Estás seguro? Esto generará jugadores aleatorios para los equipos que tengan menos de 8 jugadores.",
+            async () => {
+                const success = await api.seedPlayers(tournamentId);
+                if (success) {
+                    toast.success('Jugadores generados correctamente');
+                    onUpdate();
+                } else {
+                    toast.error('No se pudieron generar jugadores. Asegúrate de tener equipos registrados en este torneo.');
+                }
             }
-        }
+        );
     };
 
     const handleAddPlayer = async () => {
@@ -71,10 +99,15 @@ export const AdminTeams: React.FC<AdminTeamsProps> = ({ tournamentId, teams, pla
     };
 
     const handleDeletePlayer = async (id: number) => {
-        if (confirm('¿Seguro que quieres eliminar a este jugador?')) {
-            await api.deletePlayer(id);
-            onUpdate();
-        }
+        openConfirm(
+            "Eliminar Jugador",
+            "¿Estás seguro de eliminar a este jugador? Esta acción no se puede deshacer.",
+            async () => {
+                await api.deletePlayer(id);
+                onUpdate();
+            },
+            true
+        );
     };
 
     const startEditingPlayer = (p: Player) => {
@@ -82,7 +115,6 @@ export const AdminTeams: React.FC<AdminTeamsProps> = ({ tournamentId, teams, pla
         setEditPlayerName(p.name);
         setEditPlayerNumber(p.number);
         setEditPlayerCustomGoals(p.custom_goals || 0);
-        setEditPlayerCustomFouls(p.custom_fouls || 0);
     };
 
     const saveEditingPlayer = async () => {
@@ -92,8 +124,7 @@ export const AdminTeams: React.FC<AdminTeamsProps> = ({ tournamentId, teams, pla
             team_id: selectedTeam.id,
             name: editPlayerName,
             number: editPlayerNumber,
-            custom_goals: editPlayerCustomGoals,
-            custom_fouls: editPlayerCustomFouls
+            custom_goals: editPlayerCustomGoals
         });
         setEditingPlayerId(null);
         onUpdate();
@@ -104,6 +135,14 @@ export const AdminTeams: React.FC<AdminTeamsProps> = ({ tournamentId, teams, pla
     if (!selectedTeam) {
         return (
             <div className="p-8 animate-in fade-in zoom-in-95 duration-300">
+                <ConfirmDialog
+                    isOpen={confirmOpen}
+                    title={confirmConfig.title}
+                    message={confirmConfig.message}
+                    onConfirm={handleConfirm}
+                    onCancel={() => setConfirmOpen(false)}
+                    isDestructive={confirmConfig.isDestructive}
+                />
                 <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
                     <span className="text-emerald-500"><Users className="w-8 h-8" /></span> Gestión de Equipos
                 </h2>
@@ -131,6 +170,14 @@ export const AdminTeams: React.FC<AdminTeamsProps> = ({ tournamentId, teams, pla
 
     return (
         <div className="p-8 animate-in fade-in zoom-in-95 duration-300">
+            <ConfirmDialog
+                isOpen={confirmOpen}
+                title={confirmConfig.title}
+                message={confirmConfig.message}
+                onConfirm={handleConfirm}
+                onCancel={() => setConfirmOpen(false)}
+                isDestructive={confirmConfig.isDestructive}
+            />
             <div className="animate-in fade-in slide-in-from-right-8 duration-300">
                 <button onClick={() => setSelectedTeam(null)} className="mb-6 text-slate-400 hover:text-white font-bold flex items-center gap-2 transition">← Volver a Lista</button>
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -159,7 +206,7 @@ export const AdminTeams: React.FC<AdminTeamsProps> = ({ tournamentId, teams, pla
                         <h3 className="text-xl font-bold text-purple-400 mb-6 flex items-center gap-3"><span className="text-purple-500"><UserCheck className="w-6 h-6" /></span> Plantilla de Jugadores</h3>
                         <div className="bg-slate-900 rounded-xl shadow-inner border border-slate-700 overflow-hidden">
                             <table className="w-full text-left">
-                                <thead className="bg-slate-950 text-slate-400 uppercase text-xs tracking-wider"><tr><th className="p-4">#</th><th className="p-4">Nombre</th><th className="p-4 text-center">Goles</th><th className="p-4 text-center">Faltas</th><th className="p-4 text-right">Acciones</th></tr></thead>
+                                <thead className="bg-slate-950 text-slate-400 uppercase text-xs tracking-wider"><tr><th className="p-4">#</th><th className="p-4">Nombre</th><th className="p-4 text-center">Goles</th><th className="p-4 text-right">Acciones</th></tr></thead>
                                 <tbody className="divide-y divide-slate-800">
                                     {players.filter(p => p.team_id === selectedTeam.id).map(p => (
                                         <tr key={p.id} className="hover:bg-slate-800/50 transition">
@@ -168,7 +215,6 @@ export const AdminTeams: React.FC<AdminTeamsProps> = ({ tournamentId, teams, pla
                                                     <td className="p-2"><input className="w-12 bg-slate-700 text-white border border-slate-600 p-1 rounded text-center" type="number" value={editPlayerNumber} onChange={e => setEditPlayerNumber(Number(e.target.value))} /></td>
                                                     <td className="p-2"><input className="w-full bg-slate-700 text-white border border-slate-600 p-1 rounded" type="text" value={editPlayerName} onChange={e => setEditPlayerName(e.target.value)} /></td>
                                                     <td className="p-2 text-center"><input className="w-12 bg-slate-700 text-white border border-slate-600 p-1 rounded text-center" type="number" value={editPlayerCustomGoals} onChange={e => setEditPlayerCustomGoals(Number(e.target.value))} /></td>
-                                                    <td className="p-2 text-center"><input className="w-12 bg-slate-700 text-white border border-slate-600 p-1 rounded text-center" type="number" value={editPlayerCustomFouls} onChange={e => setEditPlayerCustomFouls(Number(e.target.value))} /></td>
                                                     <td className="p-2 text-right space-x-2"><button onClick={saveEditingPlayer} className="text-green-400 font-bold text-sm bg-green-900/30 px-2 py-1 rounded border border-green-800 hover:bg-green-800">OK</button></td>
                                                 </>
                                             ) : (
@@ -176,7 +222,6 @@ export const AdminTeams: React.FC<AdminTeamsProps> = ({ tournamentId, teams, pla
                                                     <td className="p-4 font-mono font-bold w-16 text-slate-500">{p.number || '-'}</td>
                                                     <td className="p-4 font-medium text-gray-300">{p.name}</td>
                                                     <td className="p-4 text-center font-bold text-blue-400">{p.goals}</td>
-                                                    <td className="p-4 text-center font-bold text-orange-400">{p.fouls}</td>
                                                     <td className="p-4 text-right space-x-2">
                                                         <button onClick={() => startEditingPlayer(p)} className="text-blue-400 font-bold text-xs uppercase hover:text-blue-300">Edit</button>
                                                         <button onClick={() => handleDeletePlayer(p.id)} className="text-red-400 font-bold text-xs uppercase hover:text-red-300">Del</button>

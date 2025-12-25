@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { setupIPC } from './ipc'
+import { performAutoBackup } from './backup'
 
 function createWindow(): void {
     // Create the browser window.
@@ -44,6 +45,9 @@ app.whenReady().then(() => {
     electronApp.setAppUserModelId('com.electron')
 
     setupIPC()
+
+    // Auto-Backup
+    performAutoBackup();
 
     // Default open or close DevTools by F12 in development
     // and ignore CommandOrControl + R in production.

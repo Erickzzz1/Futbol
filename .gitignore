@@ -1,1 +1,20 @@
 node_modules
+*.local
+.DS_Store
+*.db
+*.db-shm
+*.db-wal
+
+# Build output
+dist/
+out/
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
