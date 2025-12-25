@@ -1,9 +1,6 @@
 import { app, BrowserWindow, ipcMain, screen } from 'electron';
 import { join } from 'path';
 import { getDB } from './database';
-// Mock Types to avoid import issues if not shared properly, or just use 'any' for IPC internal logic if laziness prefers
-// But let's verify if we can import from src/types or duplicate minimal interfaces.
-// IPC main process cannot easily import from src (frontend). Best to define local interfaces.
 
 interface Match {
     id: number;
@@ -21,19 +18,44 @@ interface Team {
     id: number;
     name: string;
     logo?: string;
+    tournament_id: number;
 }
 
 export function setupIPC() {
     const db = getDB();
-    // --- Teams ---
-    ipcMain.handle('get-teams', () => {
-        return db.prepare('SELECT * FROM teams ORDER BY name').all();
+
+    // --- Tournaments ---
+    ipcMain.handle('get-tournaments', () => {
+        return db.prepare('SELECT * FROM tournaments ORDER BY id DESC').all();
     });
 
-    ipcMain.handle('add-team', (_, { name, logo }) => {
-        const stmt = db.prepare('INSERT INTO teams (name, logo) VALUES (?, ?)');
-        const info = stmt.run(name, logo);
-        return { id: info.lastInsertRowid, name, logo };
+    ipcMain.handle('create-tournament', (_, { name, type, category }) => {
+        const stmt = db.prepare('INSERT INTO tournaments (name, type, category) VALUES (?, ?, ?)');
+        const info = stmt.run(name, type, category);
+        return { id: info.lastInsertRowid, name, type, category };
+    });
+
+    ipcMain.handle('get-tournament-details', (_, id) => {
+        return db.prepare('SELECT * FROM tournaments WHERE id = ?').get(id);
+    });
+
+    ipcMain.handle('update-tournament', (_, { id, name, type, category }) => {
+        console.log("Updating tournament:", id, name);
+        const stmt = db.prepare('UPDATE tournaments SET name = ?, type = ?, category = ? WHERE id = ?');
+        stmt.run(name, type, category, id);
+        return { id, name, type, category };
+    });
+
+    // --- Teams ---
+    ipcMain.handle('get-teams', (_, tournamentId) => {
+        if (!tournamentId) return [];
+        return db.prepare('SELECT * FROM teams WHERE tournament_id = ? ORDER BY name').all(tournamentId);
+    });
+
+    ipcMain.handle('add-team', (_, { name, logo, tournamentId }) => {
+        const stmt = db.prepare('INSERT INTO teams (name, logo, tournament_id) VALUES (?, ?, ?)');
+        const info = stmt.run(name, logo, tournamentId);
+        return { id: info.lastInsertRowid, name, logo, tournament_id: tournamentId };
     });
 
     ipcMain.handle('update-team', (_, { id, name, logo }) => {
@@ -97,15 +119,16 @@ export function setupIPC() {
     });
 
     // --- Matches ---
-    ipcMain.handle('get-matches', (_, { matchday, stage }) => {
+    ipcMain.handle('get-matches', (_, { matchday, stage, tournamentId }) => {
+        if (!tournamentId) return [];
         let query = `
         SELECT m.*, t1.name as home_team, t2.name as away_team 
         FROM matches m
         LEFT JOIN teams t1 ON m.home_team_id = t1.id
         LEFT JOIN teams t2 ON m.away_team_id = t2.id
-        WHERE 1=1
+        WHERE t1.tournament_id = ?
     `;
-        const params: any[] = [];
+        const params: any[] = [tournamentId];
 
         if (matchday) {
             query += ' AND matchday = ?';
@@ -150,9 +173,10 @@ export function setupIPC() {
     });
 
     // --- Automation ---
-    ipcMain.handle('generate-fixture', (_, { startDate, startTime, matchDuration, matchInterval }) => {
-        // 1. Get all teams
-        const teams = db.prepare('SELECT id FROM teams').all() as { id: number }[];
+    ipcMain.handle('generate-fixture', (_, { startDate, startTime, matchDuration, matchInterval, tournamentId }) => {
+        if (!tournamentId) return false;
+        // 1. Get all teams for this tournament
+        const teams = db.prepare('SELECT id FROM teams WHERE tournament_id = ?').all(tournamentId) as { id: number }[];
         if (teams.length < 2) return false;
 
         // Default values
@@ -227,16 +251,20 @@ export function setupIPC() {
         try { transaction(); return true; } catch (e) { console.error(e); return false; }
     });
 
-    ipcMain.handle('generate-playoffs', (_, { stage, startDate, startTime }) => {
-        console.log(`Generating playoffs for ${stage}. Date: ${startDate}, Time: ${startTime}`);
+    ipcMain.handle('generate-playoffs', (_, { stage, startDate, startTime, tournamentId }) => {
+        if (!tournamentId) return false;
+        console.log(`Generating playoffs for ${stage}. Date: ${startDate}, Time: ${startTime}, Tournament: ${tournamentId}`);
         // Helper to calculate standings inside backend
         // We can reuse the logic from get-standings but we need the raw data
-        // For brevity, let's copy the logic or extract it.
-        // Since we need to sort to find top 8.
 
         const getStandingsInternal = () => {
-            const teams = db.prepare('SELECT * FROM teams').all() as any[];
-            const matches = db.prepare("SELECT * FROM matches WHERE status = 'played' AND stage = 'regular'").all() as any[];
+            const teams = db.prepare('SELECT * FROM teams WHERE tournament_id = ?').all(tournamentId) as any[];
+            // Only regular season matches for this tournament
+            const matches = db.prepare(`
+                SELECT m.* FROM matches m
+                JOIN teams t ON m.home_team_id = t.id
+                WHERE m.status = 'played' AND m.stage = 'regular' AND t.tournament_id = ?
+            `).all(tournamentId) as any[];
 
             const standings = teams.map(team => ({ id: team.id, PTS: 0, DG: 0, GF: 0, GC: 0 }));
             const teamMap = new Map(standings.map(s => [s.id, s]));
@@ -260,8 +288,13 @@ export function setupIPC() {
             });
         };
 
-        // Deduplication check
-        const existingMatches = db.prepare('SELECT count(*) as count FROM matches WHERE stage = ?').get(stage) as { count: number };
+        // Deduplication check - also need to scope by tournament
+        const existingMatches = db.prepare(`
+            SELECT count(*) as count FROM matches m
+            JOIN teams t ON m.home_team_id = t.id
+            WHERE m.stage = ? AND t.tournament_id = ?
+        `).get(stage, tournamentId) as { count: number };
+
         if (existingMatches.count > 0) {
             throw new Error(`Los partidos de ${stage} ya fueron generados.`);
         }
@@ -304,13 +337,14 @@ export function setupIPC() {
                 insert.run(top8[3].id, top8[4].id, d);
 
             } else if (stage === 'semi') {
-                // Logic: Find winners of 'quarter' matches
-                // This is tricky. We need to know WHICH match corresponds to 1v8 etc. 
-                // Simplification: We assume the Quarter finals are stored in ID order: 1v8, 2v7, 3v6, 4v5.
-                // A better way is to look at the teams. 
-                // But for this MVP: 
-                // Fetch 'quarter' matches. Identify winner.
-                const quarters = db.prepare("SELECT * FROM matches WHERE stage = 'quarter' ORDER BY id").all() as any[];
+                // Logic: Find winners of 'quarter' matches within this tournament
+                const quarters = db.prepare(`
+                    SELECT m.* FROM matches m
+                    JOIN teams t ON m.home_team_id = t.id
+                    WHERE m.stage = 'quarter' AND t.tournament_id = ?
+                    ORDER BY m.id
+                `).all(tournamentId) as any[];
+
                 if (quarters.length !== 4) throw new Error("Quarters not finished or invalid count");
                 if (quarters.some(m => m.status !== 'played')) throw new Error("Finish Quarter finals first");
 
@@ -335,7 +369,13 @@ export function setupIPC() {
                 insert.run(w3, w4, d);
 
             } else if (stage === 'final') {
-                const semis = db.prepare("SELECT * FROM matches WHERE stage = 'semi' ORDER BY id").all() as any[];
+                const semis = db.prepare(`
+                    SELECT m.* FROM matches m
+                    JOIN teams t ON m.home_team_id = t.id
+                    WHERE m.stage = 'semi' AND t.tournament_id = ?
+                    ORDER BY m.id
+                `).all(tournamentId) as any[];
+
                 if (semis.length !== 2) throw new Error("Semis not finished");
                 if (semis.some(m => m.status !== 'played')) throw new Error("Finish Semis first");
 
@@ -348,14 +388,22 @@ export function setupIPC() {
             }
         });
 
-        try { transaction(); return true; } catch (e) { console.error(e); return false; }
+        try { transaction(); return true; } catch (e) {
+            console.error(e);
+            return false;
+        }
     });
 
     // --- Stats ---
-    ipcMain.handle('get-standings', () => {
+    ipcMain.handle('get-standings', (_, tournamentId) => {
+        if (!tournamentId) return [];
         // Only REGULAR season counts for standings table
-        const teams = db.prepare('SELECT * FROM teams').all() as any[];
-        const matches = db.prepare("SELECT * FROM matches WHERE status = 'played' AND stage = 'regular'").all() as any[];
+        const teams = db.prepare('SELECT * FROM teams WHERE tournament_id = ?').all(tournamentId) as any[];
+        const matches = db.prepare(`
+            SELECT m.* FROM matches m
+            JOIN teams t ON m.home_team_id = t.id
+            WHERE m.status = 'played' AND m.stage = 'regular' AND t.tournament_id = ?
+        `).all(tournamentId) as any[];
 
         const standings = teams.map(team => ({
             id: team.id,
@@ -387,7 +435,8 @@ export function setupIPC() {
         });
     });
 
-    ipcMain.handle('get-top-scorers', () => {
+    ipcMain.handle('get-top-scorers', (_, tournamentId) => {
+        if (!tournamentId) return [];
         return db.prepare(`
         SELECT 
             p.name, 
@@ -397,26 +446,36 @@ export function setupIPC() {
         JOIN teams t ON p.team_id = t.id
         LEFT JOIN goals g ON p.id = g.player_id
         LEFT JOIN matches m ON g.match_id = m.id
-        WHERE m.stage = 'regular' OR m.stage IS NULL
+        WHERE t.tournament_id = ? AND (m.stage = 'regular' OR m.stage IS NULL)
         GROUP BY p.id
         HAVING goals > 0
         ORDER BY goals DESC
         LIMIT 10
-     `).all();
+     `).all(tournamentId);
     });
 
-    ipcMain.handle('reset-tournament', () => {
-        const deleteMatches = db.prepare('DELETE FROM matches');
-        const deleteGoals = db.prepare('DELETE FROM goals');
-        const deleteFouls = db.prepare('DELETE FROM fouls');
-        const resetPlayers = db.prepare('UPDATE players SET custom_goals = 0, custom_fouls = 0');
+    ipcMain.handle('reset-tournament', (_, tournamentId) => {
+        if (!tournamentId) return false;
+
+        // Delete matches where one of the teams belongs to the tournament.
+        const teams = db.prepare('SELECT id FROM teams WHERE tournament_id = ?').all(tournamentId) as { id: number }[];
+        if (teams.length === 0) return true; // Nothing to reset
+
+        const teamIds = teams.map(t => t.id).join(','); // Safe since IDs are numbers
+
+        // Matches to delete
+        const matches = db.prepare(`SELECT id FROM matches WHERE home_team_id IN (${teamIds})`).all() as { id: number }[];
+        const matchIds = matches.map(m => m.id).join(',');
 
         const transaction = db.transaction(() => {
-            deleteGoals.run();
-            deleteFouls.run();
-            deleteMatches.run();
-            resetPlayers.run();
-            try { db.prepare("DELETE FROM sqlite_sequence WHERE name='matches'").run(); } catch (e) { }
+            if (matchIds.length > 0) {
+                db.prepare(`DELETE FROM goals WHERE match_id IN (${matchIds})`).run();
+                db.prepare(`DELETE FROM fouls WHERE match_id IN (${matchIds})`).run();
+                db.prepare(`DELETE FROM matches WHERE id IN (${matchIds})`).run();
+            }
+
+            // Reset players custom stats
+            db.prepare(`UPDATE players SET custom_goals = 0, custom_fouls = 0 WHERE team_id IN (${teamIds})`).run();
         });
 
         try { transaction(); return true; } catch (e) { console.error(e); return false; }
@@ -439,12 +498,18 @@ export function setupIPC() {
         try { transaction(); return true; } catch (e) { console.error(e); return false; }
     });
 
-    ipcMain.handle('seed-players', () => {
-        const getTeams = db.prepare('SELECT id, name FROM teams');
+    ipcMain.handle('seed-players', (_, tournamentId) => {
+        if (!tournamentId) return false;
+        const getTeams = db.prepare('SELECT id, name FROM teams WHERE tournament_id = ?');
         const getPlayerCount = db.prepare('SELECT COUNT(*) as count FROM players WHERE team_id = ?');
         const insertPlayer = db.prepare('INSERT INTO players (name, number, team_id) VALUES (?, ?, ?)');
 
-        const teams = getTeams.all() as Team[];
+        const teams = getTeams.all(tournamentId) as Team[];
+
+        if (teams.length === 0) {
+            console.warn(`Attempted to seed players for tournament ${tournamentId} but no teams found.`);
+            return false;
+        }
 
         const transaction = db.transaction(() => {
             for (const team of teams) {
@@ -455,10 +520,6 @@ export function setupIPC() {
                 while (count < 8) {
                     added++;
                     const randomNum = Math.floor(Math.random() * 99) + 1;
-                    // Check if number exists logic skipped for seeded players for simplicity/speed or assume low collision risk/don't care for fillers
-                    // Actually, let's try to be slightly smart? No, just random is fine for "fillers". 
-                    // To avoid unique constraint error if any (schema doesn't enforce unique number per team usually, but good practice):
-                    // Schema: CREATE TABLE IF NOT EXISTS players (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, number INTEGER, team_id INTEGER, custom_goals INTEGER DEFAULT 0, custom_fouls INTEGER DEFAULT 0, FOREIGN KEY(team_id) REFERENCES teams(id));
                     insertPlayer.run(`Jugador ${added} - ${team.name.substring(0, 3).toUpperCase()}`, randomNum, team.id);
                     count++;
                 }
@@ -468,4 +529,3 @@ export function setupIPC() {
         try { transaction(); return true; } catch (e) { console.error(e); return false; }
     });
 }
-// Force reload

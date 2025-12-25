@@ -4,31 +4,38 @@ import { StandingsTable } from './StandingsTable';
 import { ScorersTable } from './ScorersTable';
 import { MatchResultsTable } from './MatchResultsTable';
 import { UpcomingMatchesTable } from './UpcomingMatchesTable';
-import { Standing, Scorer, Match } from '../types';
+import { Standing, Scorer, Match, Tournament } from '../types';
 
-export const Dashboard: React.FC = () => {
+interface DashboardProps {
+    tournamentId: number;
+}
+
+export const Dashboard: React.FC<DashboardProps> = ({ tournamentId }) => {
     const [standings, setStandings] = useState<Standing[]>([]);
     const [scorers, setScorers] = useState<Scorer[]>([]);
     const [results, setResults] = useState<Match[]>([]);
     const [upcoming, setUpcoming] = useState<Match[]>([]);
     const [filterJornada, setFilterJornada] = useState<string | number>('all');
     const [availableFilters, setAvailableFilters] = useState<{ value: string | number, label: string }[]>([]);
+    const [tournament, setTournament] = useState<Tournament | null>(null);
 
     useEffect(() => {
         loadData();
         const interval = setInterval(loadData, 5000); // Auto-refresh
         return () => clearInterval(interval);
-    }, [filterJornada]);
+    }, [filterJornada, tournamentId]);
 
     const loadData = async () => {
         try {
             // Parallel fetch for speed
-            const [s, sc, allMatchesRaw] = await Promise.all([
-                api.getStandings(),
-                api.getTopScorers(),
-                api.getMatches() // Get ALL matches to determine structure
+            const [s, sc, allMatchesRaw, tDetails] = await Promise.all([
+                api.getStandings(tournamentId),
+                api.getTopScorers(tournamentId),
+                api.getMatches(tournamentId), // Get ALL matches to determine structure
+                api.getTournamentDetails(tournamentId)
             ]);
 
+            setTournament(tDetails);
             setStandings(s);
             setScorers(sc);
 
@@ -117,8 +124,12 @@ export const Dashboard: React.FC = () => {
         <div className="min-h-screen bg-slate-900 p-6 font-sans text-gray-100">
             <header className="flex flex-col md:flex-row justify-between items-center mb-8 border-b border-slate-700 pb-6 gap-4">
                 <div className="text-center md:text-left">
-                    <h1 className="text-5xl text-gray-100 font-extrabold uppercase tracking-tight" style={{ fontFamily: 'Impact, sans-serif' }}>Liga Dominical Matutina</h1>
-                    <p className="text-amber-400 font-bold text-2xl uppercase tracking-[0.2em] mt-1">Luis Nieto</p>
+                    <h1 className="text-5xl text-gray-100 font-extrabold uppercase tracking-tight" style={{ fontFamily: 'Impact, sans-serif' }}>
+                        {tournament ? tournament.name : 'Cargando...'}
+                    </h1>
+                    <p className="text-amber-400 font-bold text-2xl uppercase tracking-[0.2em] mt-1">
+                        {tournament ? `${tournament.category}` : ''}
+                    </p>
                 </div>
 
                 <div className="bg-gradient-to-br from-amber-400 to-yellow-600 rounded-full p-1 w-24 h-24 shadow-lg shadow-amber-500/20">

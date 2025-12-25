@@ -1,4 +1,4 @@
-import { Standing, Scorer, Match, Team, Player } from './types';
+import { Standing, Scorer, Match, Team, Player, Tournament } from './types';
 
 interface ElectronAPI {
     ipcRenderer: {
@@ -13,16 +13,22 @@ declare global {
 }
 
 export const api = {
-    getStandings: (): Promise<Standing[]> => window.electron.ipcRenderer.invoke('get-standings'),
-    getTopScorers: (): Promise<Scorer[]> => window.electron.ipcRenderer.invoke('get-top-scorers'),
+    // Tournaments
+    getTournaments: (): Promise<Tournament[]> => window.electron.ipcRenderer.invoke('get-tournaments'),
+    createTournament: (data: { name: string, type: string, category: string }): Promise<Tournament> => window.electron.ipcRenderer.invoke('create-tournament', data),
+    updateTournament: (data: Tournament) => window.electron.ipcRenderer.invoke('update-tournament', data),
+    getTournamentDetails: (id: number): Promise<Tournament> => window.electron.ipcRenderer.invoke('get-tournament-details', id),
+
+    getStandings: (tournamentId: number): Promise<Standing[]> => window.electron.ipcRenderer.invoke('get-standings', tournamentId),
+    getTopScorers: (tournamentId: number): Promise<Scorer[]> => window.electron.ipcRenderer.invoke('get-top-scorers', tournamentId),
 
     // Updated filters
-    getMatches: (matchday?: number, stage?: string): Promise<Match[]> => window.electron.ipcRenderer.invoke('get-matches', { matchday, stage }),
+    getMatches: (tournamentId: number, matchday?: number, stage?: string): Promise<Match[]> => window.electron.ipcRenderer.invoke('get-matches', { tournamentId, matchday, stage }),
 
-    getTeams: (): Promise<Team[]> => window.electron.ipcRenderer.invoke('get-teams'),
+    getTeams: (tournamentId: number): Promise<Team[]> => window.electron.ipcRenderer.invoke('get-teams', tournamentId),
     getPlayers: (teamId?: number): Promise<Player[]> => window.electron.ipcRenderer.invoke('get-players', teamId),
 
-    addTeam: (team: Omit<Team, 'id'>) => window.electron.ipcRenderer.invoke('add-team', team),
+    addTeam: (team: Omit<Team, 'id'>, tournamentId: number) => window.electron.ipcRenderer.invoke('add-team', { ...team, tournamentId }),
     updateTeam: (team: Team) => window.electron.ipcRenderer.invoke('update-team', team),
     deleteTeam: (id: number) => window.electron.ipcRenderer.invoke('delete-team', id),
 
@@ -41,9 +47,9 @@ export const api = {
     ) => window.electron.ipcRenderer.invoke('update-match-score', { id, homeScore, awayScore, scorers, foulers }),
 
     // Automation
-    generateFixture: (options?: { startDate: string, startTime: string, matchDuration: number, matchInterval: number }) => window.electron.ipcRenderer.invoke('generate-fixture', options),
-    generatePlayoffs: (stage: 'quarter' | 'semi' | 'final', startDate?: string, startTime?: string) => window.electron.ipcRenderer.invoke('generate-playoffs', { stage, startDate, startTime }),
-    resetTournament: () => window.electron.ipcRenderer.invoke('reset-tournament'),
+    generateFixture: (tournamentId: number, options?: { startDate: string, startTime: string, matchDuration: number, matchInterval: number }) => window.electron.ipcRenderer.invoke('generate-fixture', { ...options, tournamentId }),
+    generatePlayoffs: (tournamentId: number, stage: 'quarter' | 'semi' | 'final', startDate?: string, startTime?: string) => window.electron.ipcRenderer.invoke('generate-playoffs', { stage, startDate, startTime, tournamentId }),
+    resetTournament: (tournamentId: number) => window.electron.ipcRenderer.invoke('reset-tournament', tournamentId),
     swapMatches: (matchId1: number, matchId2: number) => window.electron.ipcRenderer.invoke('swap-matches', { matchId1, matchId2 }),
-    seedPlayers: () => window.electron.ipcRenderer.invoke('seed-players'),
+    seedPlayers: (tournamentId: number) => window.electron.ipcRenderer.invoke('seed-players', tournamentId),
 };

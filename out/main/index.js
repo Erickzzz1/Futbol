@@ -15,10 +15,19 @@ function getDB() {
 }
 function initSchema(database) {
   const schema = `
+    CREATE TABLE IF NOT EXISTS tournaments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT, -- Dominical Nocturno, etc.
+      category TEXT -- Prebenjamín, etc.
+    );
+
     CREATE TABLE IF NOT EXISTS teams (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE,
-      logo TEXT
+      name TEXT NOT NULL,
+      logo TEXT,
+      tournament_id INTEGER,
+      FOREIGN KEY(tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS players (
@@ -65,6 +74,25 @@ function initSchema(database) {
   `;
   database.exec(schema);
   try {
+    const columns = database.prepare("PRAGMA table_info(teams)").all();
+    const hasTournamentId = columns.some((c) => c.name === "tournament_id");
+    if (!hasTournamentId) {
+      database.prepare("ALTER TABLE teams ADD COLUMN tournament_id INTEGER").run();
+      console.log("Migrated: Added 'tournament_id' column to teams");
+      const defaultTournament = database.prepare("SELECT id FROM tournaments WHERE name = 'Torneo Default'").get();
+      let tournamentId = defaultTournament?.id;
+      if (!tournamentId) {
+        const info = database.prepare("INSERT INTO tournaments (name, type, category) VALUES (?, ?, ?)").run("Torneo Default", "Dominical Matutino", "Libre");
+        tournamentId = info.lastInsertRowid;
+      }
+      database.prepare("UPDATE teams SET tournament_id = ? WHERE tournament_id IS NULL").run(tournamentId);
+    } else {
+      database.prepare("UPDATE tournaments SET type = 'Dominical Matutino' WHERE name = 'Torneo Default' AND type = 'General'").run();
+    }
+  } catch (e) {
+    console.error("Migration check failed (teams):", e);
+  }
+  try {
     const columns = database.prepare("PRAGMA table_info(matches)").all();
     const hasStage = columns.some((c) => c.name === "stage");
     if (!hasStage) {
@@ -89,46 +117,34 @@ function initSchema(database) {
   } catch (e) {
     console.error("Migration check failed (players):", e);
   }
-  try {
-    const count = database.prepare("SELECT count(*) as c FROM teams").get();
-    if (count && count.c === 0) {
-      const teams = [
-        "VILLAS",
-        "RADIO LS",
-        "DEP DELGADO",
-        "JOGA BONITO",
-        "RESTOS DEL BARRIO",
-        "EXCELENCIA",
-        "DOUGLAS",
-        "TAQUERIA 7",
-        "EL REGRESO",
-        "BLACK SHARKS",
-        "LA FAMILIA",
-        "INTER",
-        "HULL CITY",
-        "IMEX",
-        "PARIS",
-        "BARBERENA"
-      ];
-      const insert = database.prepare("INSERT INTO teams (name) VALUES (?)");
-      const insertMany = database.transaction((teams2) => {
-        for (const team of teams2) insert.run(team);
-      });
-      insertMany(teams);
-    }
-  } catch (e) {
-    console.error("Failed to seed:", e);
-  }
 }
 function setupIPC() {
   const db2 = getDB();
-  electron.ipcMain.handle("get-teams", () => {
-    return db2.prepare("SELECT * FROM teams ORDER BY name").all();
+  electron.ipcMain.handle("get-tournaments", () => {
+    return db2.prepare("SELECT * FROM tournaments ORDER BY id DESC").all();
   });
-  electron.ipcMain.handle("add-team", (_, { name, logo }) => {
-    const stmt = db2.prepare("INSERT INTO teams (name, logo) VALUES (?, ?)");
-    const info = stmt.run(name, logo);
-    return { id: info.lastInsertRowid, name, logo };
+  electron.ipcMain.handle("create-tournament", (_, { name, type, category }) => {
+    const stmt = db2.prepare("INSERT INTO tournaments (name, type, category) VALUES (?, ?, ?)");
+    const info = stmt.run(name, type, category);
+    return { id: info.lastInsertRowid, name, type, category };
+  });
+  electron.ipcMain.handle("get-tournament-details", (_, id) => {
+    return db2.prepare("SELECT * FROM tournaments WHERE id = ?").get(id);
+  });
+  electron.ipcMain.handle("update-tournament", (_, { id, name, type, category }) => {
+    console.log("Updating tournament:", id, name);
+    const stmt = db2.prepare("UPDATE tournaments SET name = ?, type = ?, category = ? WHERE id = ?");
+    stmt.run(name, type, category, id);
+    return { id, name, type, category };
+  });
+  electron.ipcMain.handle("get-teams", (_, tournamentId) => {
+    if (!tournamentId) return [];
+    return db2.prepare("SELECT * FROM teams WHERE tournament_id = ? ORDER BY name").all(tournamentId);
+  });
+  electron.ipcMain.handle("add-team", (_, { name, logo, tournamentId }) => {
+    const stmt = db2.prepare("INSERT INTO teams (name, logo, tournament_id) VALUES (?, ?, ?)");
+    const info = stmt.run(name, logo, tournamentId);
+    return { id: info.lastInsertRowid, name, logo, tournament_id: tournamentId };
   });
   electron.ipcMain.handle("update-team", (_, { id, name, logo }) => {
     const stmt = db2.prepare("UPDATE teams SET name = ?, logo = ? WHERE id = ?");
@@ -183,15 +199,16 @@ function setupIPC() {
     db2.prepare("DELETE FROM players WHERE id = ?").run(id);
     return true;
   });
-  electron.ipcMain.handle("get-matches", (_, { matchday, stage }) => {
+  electron.ipcMain.handle("get-matches", (_, { matchday, stage, tournamentId }) => {
+    if (!tournamentId) return [];
     let query = `
         SELECT m.*, t1.name as home_team, t2.name as away_team 
         FROM matches m
         LEFT JOIN teams t1 ON m.home_team_id = t1.id
         LEFT JOIN teams t2 ON m.away_team_id = t2.id
-        WHERE 1=1
+        WHERE t1.tournament_id = ?
     `;
-    const params = [];
+    const params = [tournamentId];
     if (matchday) {
       query += " AND matchday = ?";
       params.push(matchday);
@@ -232,8 +249,9 @@ function setupIPC() {
       return false;
     }
   });
-  electron.ipcMain.handle("generate-fixture", (_, { startDate, startTime, matchDuration, matchInterval }) => {
-    const teams = db2.prepare("SELECT id FROM teams").all();
+  electron.ipcMain.handle("generate-fixture", (_, { startDate, startTime, matchDuration, matchInterval, tournamentId }) => {
+    if (!tournamentId) return false;
+    const teams = db2.prepare("SELECT id FROM teams WHERE tournament_id = ?").all(tournamentId);
     if (teams.length < 2) return false;
     const interval = matchInterval || 7;
     const duration = matchDuration || 40;
@@ -289,11 +307,16 @@ function setupIPC() {
       return false;
     }
   });
-  electron.ipcMain.handle("generate-playoffs", (_, { stage, startDate, startTime }) => {
-    console.log(`Generating playoffs for ${stage}. Date: ${startDate}, Time: ${startTime}`);
+  electron.ipcMain.handle("generate-playoffs", (_, { stage, startDate, startTime, tournamentId }) => {
+    if (!tournamentId) return false;
+    console.log(`Generating playoffs for ${stage}. Date: ${startDate}, Time: ${startTime}, Tournament: ${tournamentId}`);
     const getStandingsInternal = () => {
-      const teams = db2.prepare("SELECT * FROM teams").all();
-      const matches = db2.prepare("SELECT * FROM matches WHERE status = 'played' AND stage = 'regular'").all();
+      const teams = db2.prepare("SELECT * FROM teams WHERE tournament_id = ?").all(tournamentId);
+      const matches = db2.prepare(`
+                SELECT m.* FROM matches m
+                JOIN teams t ON m.home_team_id = t.id
+                WHERE m.status = 'played' AND m.stage = 'regular' AND t.tournament_id = ?
+            `).all(tournamentId);
       const standings = teams.map((team) => ({ id: team.id, PTS: 0, DG: 0, GF: 0, GC: 0 }));
       const teamMap = new Map(standings.map((s) => [s.id, s]));
       for (const m of matches) {
@@ -319,7 +342,11 @@ function setupIPC() {
         return b.GF - a.GF;
       });
     };
-    const existingMatches = db2.prepare("SELECT count(*) as count FROM matches WHERE stage = ?").get(stage);
+    const existingMatches = db2.prepare(`
+            SELECT count(*) as count FROM matches m
+            JOIN teams t ON m.home_team_id = t.id
+            WHERE m.stage = ? AND t.tournament_id = ?
+        `).get(stage, tournamentId);
     if (existingMatches.count > 0) {
       throw new Error(`Los partidos de ${stage} ya fueron generados.`);
     }
@@ -350,7 +377,12 @@ function setupIPC() {
         insert.run(top8[2].id, top8[5].id, d);
         insert.run(top8[3].id, top8[4].id, d);
       } else if (stage === "semi") {
-        const quarters = db2.prepare("SELECT * FROM matches WHERE stage = 'quarter' ORDER BY id").all();
+        const quarters = db2.prepare(`
+                    SELECT m.* FROM matches m
+                    JOIN teams t ON m.home_team_id = t.id
+                    WHERE m.stage = 'quarter' AND t.tournament_id = ?
+                    ORDER BY m.id
+                `).all(tournamentId);
         if (quarters.length !== 4) throw new Error("Quarters not finished or invalid count");
         if (quarters.some((m) => m.status !== "played")) throw new Error("Finish Quarter finals first");
         const getWinner = (m) => m.home_score > m.away_score ? m.home_team_id : m.away_team_id;
@@ -363,7 +395,12 @@ function setupIPC() {
         insert.run(w1, w2, d);
         insert.run(w3, w4, d);
       } else if (stage === "final") {
-        const semis = db2.prepare("SELECT * FROM matches WHERE stage = 'semi' ORDER BY id").all();
+        const semis = db2.prepare(`
+                    SELECT m.* FROM matches m
+                    JOIN teams t ON m.home_team_id = t.id
+                    WHERE m.stage = 'semi' AND t.tournament_id = ?
+                    ORDER BY m.id
+                `).all(tournamentId);
         if (semis.length !== 2) throw new Error("Semis not finished");
         if (semis.some((m) => m.status !== "played")) throw new Error("Finish Semis first");
         const getWinner = (m) => m.home_score > m.away_score ? m.home_team_id : m.away_team_id;
@@ -381,9 +418,14 @@ function setupIPC() {
       return false;
     }
   });
-  electron.ipcMain.handle("get-standings", () => {
-    const teams = db2.prepare("SELECT * FROM teams").all();
-    const matches = db2.prepare("SELECT * FROM matches WHERE status = 'played' AND stage = 'regular'").all();
+  electron.ipcMain.handle("get-standings", (_, tournamentId) => {
+    if (!tournamentId) return [];
+    const teams = db2.prepare("SELECT * FROM teams WHERE tournament_id = ?").all(tournamentId);
+    const matches = db2.prepare(`
+            SELECT m.* FROM matches m
+            JOIN teams t ON m.home_team_id = t.id
+            WHERE m.status = 'played' AND m.stage = 'regular' AND t.tournament_id = ?
+        `).all(tournamentId);
     const standings = teams.map((team) => ({
       id: team.id,
       name: team.name,
@@ -433,7 +475,8 @@ function setupIPC() {
       return b.GF - a.GF;
     });
   });
-  electron.ipcMain.handle("get-top-scorers", () => {
+  electron.ipcMain.handle("get-top-scorers", (_, tournamentId) => {
+    if (!tournamentId) return [];
     return db2.prepare(`
         SELECT 
             p.name, 
@@ -443,27 +486,27 @@ function setupIPC() {
         JOIN teams t ON p.team_id = t.id
         LEFT JOIN goals g ON p.id = g.player_id
         LEFT JOIN matches m ON g.match_id = m.id
-        WHERE m.stage = 'regular' OR m.stage IS NULL
+        WHERE t.tournament_id = ? AND (m.stage = 'regular' OR m.stage IS NULL)
         GROUP BY p.id
         HAVING goals > 0
         ORDER BY goals DESC
         LIMIT 10
-     `).all();
+     `).all(tournamentId);
   });
-  electron.ipcMain.handle("reset-tournament", () => {
-    const deleteMatches = db2.prepare("DELETE FROM matches");
-    const deleteGoals = db2.prepare("DELETE FROM goals");
-    const deleteFouls = db2.prepare("DELETE FROM fouls");
-    const resetPlayers = db2.prepare("UPDATE players SET custom_goals = 0, custom_fouls = 0");
+  electron.ipcMain.handle("reset-tournament", (_, tournamentId) => {
+    if (!tournamentId) return false;
+    const teams = db2.prepare("SELECT id FROM teams WHERE tournament_id = ?").all(tournamentId);
+    if (teams.length === 0) return true;
+    const teamIds = teams.map((t) => t.id).join(",");
+    const matches = db2.prepare(`SELECT id FROM matches WHERE home_team_id IN (${teamIds})`).all();
+    const matchIds = matches.map((m) => m.id).join(",");
     const transaction = db2.transaction(() => {
-      deleteGoals.run();
-      deleteFouls.run();
-      deleteMatches.run();
-      resetPlayers.run();
-      try {
-        db2.prepare("DELETE FROM sqlite_sequence WHERE name='matches'").run();
-      } catch (e) {
+      if (matchIds.length > 0) {
+        db2.prepare(`DELETE FROM goals WHERE match_id IN (${matchIds})`).run();
+        db2.prepare(`DELETE FROM fouls WHERE match_id IN (${matchIds})`).run();
+        db2.prepare(`DELETE FROM matches WHERE id IN (${matchIds})`).run();
       }
+      db2.prepare(`UPDATE players SET custom_goals = 0, custom_fouls = 0 WHERE team_id IN (${teamIds})`).run();
     });
     try {
       transaction();
@@ -491,11 +534,16 @@ function setupIPC() {
       return false;
     }
   });
-  electron.ipcMain.handle("seed-players", () => {
-    const getTeams = db2.prepare("SELECT id, name FROM teams");
+  electron.ipcMain.handle("seed-players", (_, tournamentId) => {
+    if (!tournamentId) return false;
+    const getTeams = db2.prepare("SELECT id, name FROM teams WHERE tournament_id = ?");
     const getPlayerCount = db2.prepare("SELECT COUNT(*) as count FROM players WHERE team_id = ?");
     const insertPlayer = db2.prepare("INSERT INTO players (name, number, team_id) VALUES (?, ?, ?)");
-    const teams = getTeams.all();
+    const teams = getTeams.all(tournamentId);
+    if (teams.length === 0) {
+      console.warn(`Attempted to seed players for tournament ${tournamentId} but no teams found.`);
+      return false;
+    }
     const transaction = db2.transaction(() => {
       for (const team of teams) {
         const countResult = getPlayerCount.get(team.id);

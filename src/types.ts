@@ -1,3 +1,11 @@
+
+export interface Tournament {
+    id: number;
+    name: string;
+    type: string;
+    category: string;
+}
+
 export interface Team {
     id: number;
     name: string;

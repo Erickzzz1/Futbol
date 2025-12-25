@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api';
 import { Team, Match, Player, Standing } from '../types';
+import { Calendar, BarChart3, Users, Trophy, Bot, UserCheck, Edit2, Zap, AlertTriangle, ArrowLeftRight, Check, RefreshCw, Trash2, Plus, Minus, Square, ArrowLeft, Goal } from 'lucide-react';
 
-export const Admin: React.FC = () => {
+interface AdminProps {
+    tournamentId: number;
+}
+
+export const Admin: React.FC<AdminProps> = ({ tournamentId }) => {
     // Added 'playoffs' tab
     const [tab, setTab] = useState<'schedule' | 'results' | 'teams' | 'playoffs'>('schedule');
     const [teams, setTeams] = useState<Team[]>([]);
@@ -66,16 +71,24 @@ export const Admin: React.FC = () => {
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, [tournamentId]);
 
     const loadData = async () => {
-        const t = await api.getTeams();
+        const t = await api.getTeams(tournamentId);
         setTeams(t);
-        const p = await api.getPlayers();
-        setPlayers(p);
-        const m = await api.getMatches();
+        const p = await api.getPlayers(); // Does not need tournamentId directly if filtered by team later, but ideally API filters by tournament or returns all. Current API: getPlayers(teamId?). Return ALL players if no teamId. 
+        // We probably only want players for the current tournament teams.
+        // But getPlayers without teamId returns ALL.
+        // Let's rely on filtering or update getPlayers? 
+        // Frontend filtering is safer for now if we don't want to change API signature too much.
+        const allPlayers = await api.getPlayers();
+        // Filter players that belong to teams in this tournament
+        const teamIds = new Set(t.map(team => team.id));
+        setPlayers(allPlayers.filter(pl => teamIds.has(pl.team_id)));
+
+        const m = await api.getMatches(tournamentId);
         setMatches(m);
-        const s = await api.getStandings();
+        const s = await api.getStandings(tournamentId);
         setStandings(s);
 
         // Auto-select current matchday for schedule filter
@@ -122,7 +135,7 @@ export const Admin: React.FC = () => {
                 return;
             }
         }
-        await api.generateFixture({
+        await api.generateFixture(tournamentId, {
             startDate: autoStartDate,
             startTime: autoStartTime,
             matchDuration: autoMatchDuration,
@@ -133,10 +146,15 @@ export const Admin: React.FC = () => {
     };
 
     const handleSeedPlayers = async () => {
-        if (confirm("¿Generar automáticamente jugadores para completar equipos (hasta 8 por equipo)?")) {
-            await api.seedPlayers();
-            alert('Jugadores Generados Exitosamente');
-            loadData();
+        if (!tournamentId) return;
+        if (confirm('¿Estás seguro? Esto generará jugadores aleatorios para los equipos que tengan menos de 8 jugadores.')) {
+            const success = await api.seedPlayers(tournamentId);
+            if (success) {
+                alert('Jugadores generados correctamente');
+                loadData();
+            } else {
+                alert('No se pudieron generar jugadores. Asegúrate de tener equipos registrados en este torneo.');
+            }
         }
     };
 
@@ -144,7 +162,7 @@ export const Admin: React.FC = () => {
     const handleResetTournament = async () => {
         if (confirm("¿ESTÁS SEGURO? Esto borrará TODOS los partidos, resultados y reiniciará las estadísticas de los jugadores. Los equipos y jugadores se mantendrán.")) {
             if (confirm("Confirmación final: ¿Realmente deseas borrar todo el torneo?")) {
-                await api.resetTournament();
+                await api.resetTournament(tournamentId);
                 alert("Torneo reiniciado correctamente.");
                 loadData();
             }
@@ -158,7 +176,7 @@ export const Admin: React.FC = () => {
             if (stage === 'semi') { d = semiDate; t = semiTime; }
             if (stage === 'final') { d = finalDate; t = finalTime; }
 
-            await api.generatePlayoffs(stage, d, t);
+            await api.generatePlayoffs(tournamentId, stage, d, t);
             alert(`Partidos de ${stage === 'quarter' ? 'Cuartos' : stage === 'semi' ? 'Semifinales' : 'Final'} generados.`);
             loadData();
         } catch (e) {
@@ -215,7 +233,7 @@ export const Admin: React.FC = () => {
 
     const handleAddTeam = async () => {
         if (!newTeamName) return;
-        await api.addTeam({ name: newTeamName });
+        await api.addTeam({ name: newTeamName }, tournamentId);
         setNewTeamName('');
         loadData();
     };
@@ -397,27 +415,27 @@ export const Admin: React.FC = () => {
                 <div className="flex flex-wrap justify-center gap-4 mb-8">
                     <button
                         onClick={() => setTab('schedule')}
-                        className={`px-8 py-3 rounded-full font-bold text-lg transition-all shadow-lg ${tab === 'schedule' ? 'bg-amber-500 text-black shadow-amber-500/30' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                        className={`px-8 py-3 rounded-full font-bold text-lg transition-all shadow-lg flex items-center gap-2 ${tab === 'schedule' ? 'bg-amber-500 text-black shadow-amber-500/30' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
                     >
-                        📅 Programar
+                        <Calendar className="w-5 h-5" /> Programar
                     </button>
                     <button
                         onClick={() => setTab('results')}
-                        className={`px-8 py-3 rounded-full font-bold text-lg transition-all shadow-lg ${tab === 'results' ? 'bg-amber-500 text-black shadow-amber-500/30' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                        className={`px-8 py-3 rounded-full font-bold text-lg transition-all shadow-lg flex items-center gap-2 ${tab === 'results' ? 'bg-amber-500 text-black shadow-amber-500/30' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
                     >
-                        📊 Registrar
+                        <BarChart3 className="w-5 h-5" /> Registrar
                     </button>
                     <button
                         onClick={() => setTab('teams')}
-                        className={`px-8 py-3 rounded-full font-bold text-lg transition-all shadow-lg ${tab === 'teams' ? 'bg-amber-500 text-black shadow-amber-500/30' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                        className={`px-8 py-3 rounded-full font-bold text-lg transition-all shadow-lg flex items-center gap-2 ${tab === 'teams' ? 'bg-amber-500 text-black shadow-amber-500/30' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
                     >
-                        ⚽ Equipos
+                        <Users className="w-5 h-5" /> Equipos
                     </button>
                     <button
                         onClick={() => setTab('playoffs')}
-                        className={`px-8 py-3 rounded-full font-bold text-lg transition-all shadow-lg ${tab === 'playoffs' ? 'bg-amber-500 text-black shadow-amber-500/30' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                        className={`px-8 py-3 rounded-full font-bold text-lg transition-all shadow-lg flex items-center gap-2 ${tab === 'playoffs' ? 'bg-amber-500 text-black shadow-amber-500/30' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
                     >
-                        🏆 Liguilla
+                        <Trophy className="w-5 h-5" /> Liguilla
                     </button>
                 </div>
 
@@ -426,7 +444,7 @@ export const Admin: React.FC = () => {
                     {tab === 'schedule' && (
                         <div className="p-8 animate-in fade-in zoom-in-95 duration-300">
                             <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-                                <span className="text-amber-500">📅</span> Generador de Calendario
+                                <span className="text-amber-500"><Calendar className="w-8 h-8" /></span> Generador de Calendario
                             </h2>
 
                             <div className="bg-slate-900/50 p-6 rounded-xl border border-slate-700 mb-8">
@@ -451,10 +469,10 @@ export const Admin: React.FC = () => {
                                 </div>
                                 <div className="flex gap-4 mt-6">
                                     <button onClick={handleGenerateFixture} className="flex-1 bg-amber-500 hover:bg-amber-600 text-black px-6 py-3 rounded-lg font-bold shadow-md transition flex items-center justify-center gap-2">
-                                        ⚡ Generar Calendario Completo
+                                        <Zap className="w-4 h-4" /> Generar Calendario Completo
                                     </button>
                                     <button onClick={handleResetTournament} className="flex-1 border-2 border-red-500 text-red-400 hover:bg-red-900 font-bold py-3 rounded-lg uppercase tracking-widest text-sm transition flex items-center justify-center gap-2">
-                                        ⚠️ Borrar Torneo
+                                        <AlertTriangle className="w-4 h-4" /> Borrar Torneo
                                     </button>
                                 </div>
                                 <p className="text-center text-xs text-slate-500 mt-4 font-bold">Cuidado: Generar un nuevo calendario borrará todos los partidos existentes. Borrar torneo es irreversible.</p>
@@ -465,7 +483,7 @@ export const Admin: React.FC = () => {
                             <div className="mt-12">
                                 <div className="flex justify-between items-center mb-6">
                                     <h3 className="text-xl font-bold text-slate-200 flex items-center gap-2">
-                                        <span className="text-amber-500">📅</span> Calendario Programado
+                                        <span className="text-amber-500"><Calendar className="w-6 h-6" /></span> Calendario Programado
                                     </h3>
                                     <select
                                         className="p-2 border border-slate-600 rounded-lg bg-slate-700 font-bold text-white shadow-sm focus:ring-amber-500 focus:border-amber-500"
@@ -506,7 +524,7 @@ export const Admin: React.FC = () => {
                                                         onClick={() => handleSwapMatches(m.id)}
                                                         className={`px-4 py-2 rounded-lg text-sm font-bold border flex items-center gap-2 transition-all ${swapSourceId === m.id ? 'bg-amber-500 text-black border-amber-500 shadow-md transform scale-105' : 'bg-slate-900 text-slate-400 border-slate-600 hover:border-amber-500 hover:text-amber-500'}`}
                                                     >
-                                                        {swapSourceId === m.id ? '⚡ Seleccionado' : '🔄 Intercambiar'}
+                                                        {swapSourceId === m.id ? <span className="flex items-center gap-1"><Check className="w-4 h-4" /> Seleccionado</span> : <span className="flex items-center gap-1"><ArrowLeftRight className="w-4 h-4" /> Intercambiar</span>}
                                                     </button>
                                                 </div>
                                             </div>
@@ -524,10 +542,10 @@ export const Admin: React.FC = () => {
                             {!selectedTeam ? (
                                 <>
                                     <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-                                        <span className="text-emerald-500">⚽</span> Gestión de Equipos
+                                        <span className="text-emerald-500"><Users className="w-8 h-8" /></span> Gestión de Equipos
                                     </h2>
                                     <div className="flex gap-4 mb-8 bg-slate-900/50 p-4 rounded-xl border border-slate-700">
-                                        <input type="text" placeholder="Nombre del Nuevo Equipo" className="flex-1 p-3 border border-slate-600 rounded-lg bg-slate-800 text-white focus:ring-emerald-500 focus:border-emerald-500" value={newTeamName} onChange={e => setNewTeamName(e.target.value)} />
+                                        <input type="text" placeholder="Nombre del Equipo..." className="flex-1 p-3 border border-slate-600 rounded-lg bg-slate-800 text-white focus:ring-emerald-500 focus:border-emerald-500" value={newTeamName} onChange={e => setNewTeamName(e.target.value)} />
                                         <button onClick={handleAddTeam} className="bg-emerald-500 text-black px-6 rounded-lg font-bold hover:bg-emerald-600 hover:text-white transition shadow-lg shadow-emerald-500/20">Agregar Equipo</button>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -540,7 +558,7 @@ export const Admin: React.FC = () => {
                                     </div>
                                     <div className="mt-8 pt-6 border-t border-slate-700">
                                         <button onClick={handleSeedPlayers} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl shadow-lg shadow-indigo-500/20 transition flex items-center justify-center gap-2">
-                                            <span>🤖</span> Rellenar Equipos (Hasta 8 Jugadores)
+                                            <Bot className="w-5 h-5" /> Rellenar Equipos (Hasta 8 Jugadores)
                                         </button>
                                         <p className="text-xs text-slate-500 mt-2 text-center">Genera automáticamente jugadores aleatorios para completar plantillas de 8.</p>
                                     </div>
@@ -571,7 +589,7 @@ export const Admin: React.FC = () => {
                                             </div>
                                         </div>
                                         <div className="lg:col-span-2 bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-xl">
-                                            <h3 className="text-xl font-bold text-purple-400 mb-6 flex items-center gap-3"><span className="text-purple-500">🏃</span> Plantilla de Jugadores</h3>
+                                            <h3 className="text-xl font-bold text-purple-400 mb-6 flex items-center gap-3"><span className="text-purple-500"><UserCheck className="w-6 h-6" /></span> Plantilla de Jugadores</h3>
                                             <div className="bg-slate-900 rounded-xl shadow-inner border border-slate-700 overflow-hidden">
                                                 <table className="w-full text-left">
                                                     <thead className="bg-slate-950 text-slate-400 uppercase text-xs tracking-wider"><tr><th className="p-4">#</th><th className="p-4">Nombre</th><th className="p-4 text-center">Goles</th><th className="p-4 text-center">Faltas</th><th className="p-4 text-right">Acciones</th></tr></thead>
@@ -620,7 +638,7 @@ export const Admin: React.FC = () => {
                         <div className="p-8 animate-in fade-in zoom-in-95 duration-300">
                             <div className="flex justify-between items-center mb-6">
                                 <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-                                    <span className="text-rose-500">📊</span> Motor de Resultados
+                                    <span className="text-rose-500"><BarChart3 className="w-8 h-8" /></span> Motor de Resultados
                                 </h2>
                                 {!selectedMatch && !isNewMatchMode && (
                                     <div className="flex items-center gap-3">
@@ -681,7 +699,7 @@ export const Admin: React.FC = () => {
                                                     </div>
                                                 </div>
                                                 <button className="text-emerald-500 font-semibold text-sm group-hover:text-emerald-300 flex items-center gap-1 transition">
-                                                    <span>✏️</span> Editar
+                                                    <Edit2 className="w-4 h-4" /> Editar
                                                 </button>
                                             </div>
                                         ))}
@@ -689,7 +707,7 @@ export const Admin: React.FC = () => {
                                 </div>
                             ) : (
                                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
-                                    <button onClick={resetMatchEntry} className="text-sm text-slate-400 mb-4 hover:text-white transition font-bold flex items-center gap-2">← Cancelar / Volver</button>
+                                    <button onClick={resetMatchEntry} className="text-sm text-slate-400 mb-4 hover:text-white transition font-bold flex items-center gap-2"><ArrowLeft className="w-4 h-4" /> Cancelar / Volver</button>
                                     <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 mb-6 shadow-2xl">
                                         {isNewMatchMode ? (
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
@@ -714,12 +732,12 @@ export const Admin: React.FC = () => {
                                                     <span className="text-gray-300">{p.name} <span className="text-slate-500 text-xs">#{p.number}</span></span>
                                                     <div className="flex gap-1">
                                                         <div className="flex bg-emerald-900/40 rounded-full border border-emerald-900/50">
-                                                            <button onClick={() => removeGoal(currentHomeId, p.id)} className="w-8 h-8 flex items-center justify-center text-emerald-600 hover:text-emerald-400 font-bold border-r border-emerald-900/50 hover:bg-emerald-900/50 rounded-l-full transition">-</button>
-                                                            <button onClick={() => addGoal(currentHomeId, p.id)} className="w-8 h-8 flex items-center justify-center text-emerald-400 hover:text-white font-bold hover:bg-emerald-600 rounded-r-full transition">⚽</button>
+                                                            <button onClick={() => removeGoal(currentHomeId, p.id)} className="w-8 h-8 flex items-center justify-center text-emerald-600 hover:text-emerald-400 font-bold border-r border-emerald-900/50 hover:bg-emerald-900/50 rounded-l-full transition"><Minus className="w-4 h-4" /></button>
+                                                            <button onClick={() => addGoal(currentHomeId, p.id)} className="w-8 h-8 flex items-center justify-center text-emerald-400 hover:text-white font-bold hover:bg-emerald-600 rounded-r-full transition"><Goal className="w-4 h-4" /></button>
                                                         </div>
                                                         <div className="flex bg-orange-900/40 rounded-full border border-orange-900/50">
-                                                            <button onClick={() => removeFoul(p.id)} className="w-8 h-8 flex items-center justify-center text-orange-600 hover:text-orange-400 font-bold border-r border-orange-900/50 hover:bg-orange-900/50 rounded-l-full transition">-</button>
-                                                            <button onClick={() => addFoul(p.id)} className="w-8 h-8 flex items-center justify-center text-orange-400 hover:text-white font-bold hover:bg-orange-600 rounded-r-full transition">🟧</button>
+                                                            <button onClick={() => removeFoul(p.id)} className="w-8 h-8 flex items-center justify-center text-orange-600 hover:text-orange-400 font-bold border-r border-orange-900/50 hover:bg-orange-900/50 rounded-l-full transition"><Minus className="w-4 h-4" /></button>
+                                                            <button onClick={() => addFoul(p.id)} className="w-8 h-8 flex items-center justify-center text-orange-400 hover:text-white font-bold hover:bg-orange-600 rounded-r-full transition"><Square className="w-4 h-4 fill-current" /></button>
                                                         </div>
                                                     </div>
                                                 </div>))}</div>
@@ -730,8 +748,8 @@ export const Admin: React.FC = () => {
                                                     <span className="text-gray-300">{p.name} <span className="text-slate-500 text-xs">#{p.number}</span></span>
                                                     <div className="flex gap-1">
                                                         <div className="flex bg-emerald-900/40 rounded-full border border-emerald-900/50">
-                                                            <button onClick={() => removeGoal(currentAwayId, p.id)} className="w-8 h-8 flex items-center justify-center text-emerald-600 hover:text-emerald-400 font-bold border-r border-emerald-900/50 hover:bg-emerald-900/50 rounded-l-full transition">-</button>
-                                                            <button onClick={() => addGoal(currentAwayId, p.id)} className="w-8 h-8 flex items-center justify-center text-emerald-400 hover:text-white font-bold hover:bg-emerald-600 rounded-r-full transition">⚽</button>
+                                                            <button onClick={() => removeGoal(currentAwayId, p.id)} className="w-8 h-8 flex items-center justify-center text-emerald-600 hover:text-emerald-400 font-bold border-r border-emerald-900/50 hover:bg-emerald-900/50 rounded-l-full transition"><Minus className="w-4 h-4" /></button>
+                                                            <button onClick={() => addGoal(currentAwayId, p.id)} className="w-8 h-8 flex items-center justify-center text-emerald-400 hover:text-white font-bold hover:bg-emerald-600 rounded-r-full transition"><Goal className="w-4 h-4" /></button>
                                                         </div>
                                                         <div className="flex bg-orange-900/40 rounded-full border border-orange-900/50">
                                                             <button onClick={() => removeFoul(p.id)} className="w-8 h-8 flex items-center justify-center text-orange-600 hover:text-orange-400 font-bold border-r border-orange-900/50 hover:bg-orange-900/50 rounded-l-full transition">-</button>
@@ -745,8 +763,8 @@ export const Admin: React.FC = () => {
                                     <div className="bg-slate-800 p-4 rounded-xl mb-6 border border-slate-700 shadow-lg">
                                         <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Resumen:</h4>
                                         <div className="flex flex-wrap gap-2">
-                                            {scorers.map((s, idx) => { const p = players.find(ply => ply.id === s.playerId); return <span key={`g-${idx}`} className="bg-slate-900 border border-emerald-900/50 px-2 py-1 rounded text-xs font-bold flex items-center gap-1 text-emerald-400">⚽ {p?.name} (x{s.count})</span> })}
-                                            {foulers.map((s, idx) => { const p = players.find(ply => ply.id === s.playerId); return <span key={`f-${idx}`} className="bg-slate-900 border border-orange-900/50 px-2 py-1 rounded text-xs font-bold flex items-center gap-1 text-orange-400">🟧 {p?.name} (x{s.count})</span> })}
+                                            {scorers.map((s, idx) => { const p = players.find(ply => ply.id === s.playerId); return <span key={`g-${idx}`} className="bg-slate-900 border border-emerald-900/50 px-2 py-1 rounded text-xs font-bold flex items-center gap-1 text-emerald-400"><Goal className="w-3 h-3" /> {p?.name} (x{s.count})</span> })}
+                                            {foulers.map((s, idx) => { const p = players.find(ply => ply.id === s.playerId); return <span key={`f-${idx}`} className="bg-slate-900 border border-orange-900/50 px-2 py-1 rounded text-xs font-bold flex items-center gap-1 text-orange-400"><Square className="w-3 h-3 fill-current" /> {p?.name} (x{s.count})</span> })}
                                         </div>
                                     </div>
                                     <button onClick={handleSaveResult} className="w-full py-4 bg-gradient-to-r from-rose-600 to-red-600 text-white font-bold rounded-xl shadow-lg hover:from-rose-500 hover:to-red-500 transition disabled:opacity-50 disabled:cursor-not-allowed border border-rose-500/50" disabled={isNewMatchMode && (!entryHomeId || !entryAwayId)}>{isNewMatchMode ? "Registrar Partido Nuevo" : "Guardar Resultado"}</button>
@@ -760,13 +778,12 @@ export const Admin: React.FC = () => {
                     {tab === 'playoffs' && (
                         <div className="p-8 animate-in fade-in zoom-in-95 duration-300">
                             <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-                                <span className="text-amber-500">🏆</span> Liguilla
+                                <span className="text-amber-500"><Trophy className="w-8 h-8" /></span> Liguilla
                             </h2>
 
                             <div className="space-y-8">
                                 {/* QUARTERS */}
                                 <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-xl relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none text-6xl">🎱</div>
 
                                     <div className="mb-6 relative z-10 border-b border-slate-700 pb-4">
                                         <div className="flex justify-between items-center mb-4">

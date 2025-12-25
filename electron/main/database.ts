@@ -16,10 +16,19 @@ export function getDB() {
 
 function initSchema(database: Database.Database) {
   const schema = `
+    CREATE TABLE IF NOT EXISTS tournaments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT, -- Dominical Nocturno, etc.
+      category TEXT -- Prebenjamín, etc.
+    );
+
     CREATE TABLE IF NOT EXISTS teams (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE,
-      logo TEXT
+      name TEXT NOT NULL,
+      logo TEXT,
+      tournament_id INTEGER,
+      FOREIGN KEY(tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS players (
@@ -66,6 +75,33 @@ function initSchema(database: Database.Database) {
   `;
   database.exec(schema);
 
+  // Migration: Add tournament_id to teams if not exists
+  try {
+    const columns = database.prepare("PRAGMA table_info(teams)").all() as any[];
+    const hasTournamentId = columns.some(c => c.name === 'tournament_id');
+    if (!hasTournamentId) {
+      database.prepare("ALTER TABLE teams ADD COLUMN tournament_id INTEGER").run();
+      console.log("Migrated: Added 'tournament_id' column to teams");
+
+      // Seed default tournament if needed and assign existing teams
+      const defaultTournament = database.prepare("SELECT id FROM tournaments WHERE name = 'Torneo Default'").get() as { id: number };
+      let tournamentId = defaultTournament?.id;
+
+      if (!tournamentId) {
+        // Default changed to Dominical Matutino as requested
+        const info = database.prepare("INSERT INTO tournaments (name, type, category) VALUES (?, ?, ?)").run('Torneo Default', 'Dominical Matutino', 'Libre');
+        tournamentId = info.lastInsertRowid as number;
+      }
+
+      database.prepare("UPDATE teams SET tournament_id = ? WHERE tournament_id IS NULL").run(tournamentId);
+    } else {
+      // Fix for existing migration if it ran with "General"
+      database.prepare("UPDATE tournaments SET type = 'Dominical Matutino' WHERE name = 'Torneo Default' AND type = 'General'").run();
+    }
+  } catch (e) {
+    console.error("Migration check failed (teams):", e);
+  }
+
   // Migration for existing databases to add 'stage' column if it doesn't exist
   try {
     const columns = database.prepare("PRAGMA table_info(matches)").all() as any[];
@@ -94,24 +130,5 @@ function initSchema(database: Database.Database) {
     }
   } catch (e) {
     console.error("Migration check failed (players):", e);
-  }
-
-  // Auto-seed if empty
-  try {
-    const count = database.prepare('SELECT count(*) as c FROM teams').get() as { c: number };
-    if (count && count.c === 0) {
-      const teams = [
-        'VILLAS', 'RADIO LS', 'DEP DELGADO', 'JOGA BONITO', 'RESTOS DEL BARRIO', 'EXCELENCIA',
-        'DOUGLAS', 'TAQUERIA 7', 'EL REGRESO', 'BLACK SHARKS', 'LA FAMILIA', 'INTER',
-        'HULL CITY', 'IMEX', 'PARIS', 'BARBERENA'
-      ];
-      const insert = database.prepare('INSERT INTO teams (name) VALUES (?)');
-      const insertMany = database.transaction((teams: string[]) => {
-        for (const team of teams) insert.run(team);
-      });
-      insertMany(teams);
-    }
-  } catch (e) {
-    console.error('Failed to seed:', e);
   }
 }
